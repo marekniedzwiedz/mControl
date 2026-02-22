@@ -1,0 +1,64 @@
+# macOS / filesystem junk
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Swift Package Manager / build
+.build/
+Packages/
+.swiftpm/
+
+# Xcode / Apple build data
+DerivedData/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# App/package outputs
+dist/
+build/
+Build/
+*.app
+*.dmg
+*.pkg
+*.zip
+
+# Logs / temp files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+tmp/
+
+# Coverage / profiling artifacts
+*.profraw
+*.profdata
+
+# Editor / IDE files
+.idea/
+.vscode/
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.local
+.netrc
+*.pem
+*.key
+*.p12
+*.p8
+*.cer
+*.crt
+*.mobileprovision
+*.provisionprofile
+AuthKey_*.p8
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
