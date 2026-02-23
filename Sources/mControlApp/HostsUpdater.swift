@@ -80,10 +80,31 @@ final class AppleScriptPrivilegedCommandRunner: PrivilegedCommandRunning {
 }
 
 final class DigDomainResolver: DomainIPResolving {
-    private let digPath: String
+    typealias SystemResolveFunction = (String) -> ResolvedIPSet
+    typealias DigCommandFunction = (String, String) -> [String]
 
-    init(digPath: String = "/usr/bin/dig") {
-        self.digPath = digPath
+    private let digAttemptsPerRecord: Int
+    private let systemResolve: SystemResolveFunction
+    private let digCommand: DigCommandFunction
+
+    init(digPath: String = "/usr/bin/dig", digAttemptsPerRecord: Int = 4) {
+        self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
+        self.systemResolve = { host in
+            DigDomainResolver.resolveUsingGetAddrInfo(host: host)
+        }
+        self.digCommand = { domain, recordType in
+            DigDomainResolver.runDigProcess(digPath: digPath, domain: domain, recordType: recordType)
+        }
+    }
+
+    init(
+        digAttemptsPerRecord: Int = 4,
+        systemResolve: @escaping SystemResolveFunction,
+        digCommand: @escaping DigCommandFunction
+    ) {
+        self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
+        self.systemResolve = systemResolve
+        self.digCommand = digCommand
     }
 
     func resolveIPAddresses(for domains: [String]) -> ResolvedIPSet {
@@ -94,7 +115,7 @@ final class DigDomainResolver: DomainIPResolving {
         var ipv6 = Set<String>()
 
         for domain in expanded {
-            let systemResolved = resolveUsingGetAddrInfo(host: domain)
+            let systemResolved = systemResolve(domain)
             for address in systemResolved.ipv4 where address != "0.0.0.0" && address != "127.0.0.1" {
                 ipv4.insert(address)
             }
@@ -118,7 +139,7 @@ final class DigDomainResolver: DomainIPResolving {
         return ResolvedIPSet(ipv4: ipv4, ipv6: ipv6)
     }
 
-    private func resolveUsingGetAddrInfo(host: String) -> ResolvedIPSet {
+    private static func resolveUsingGetAddrInfo(host: String) -> ResolvedIPSet {
         var hints = addrinfo(
             ai_flags: AI_DEFAULT,
             ai_family: AF_UNSPEC,
@@ -165,10 +186,10 @@ final class DigDomainResolver: DomainIPResolving {
         return ResolvedIPSet(ipv4: ipv4, ipv6: ipv6)
     }
 
-    private func runDig(domain: String, recordType: String) -> [String] {
+    private static func runDigProcess(digPath: String, domain: String, recordType: String) -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: digPath)
-        process.arguments = ["+short", domain, recordType]
+        process.arguments = ["+time=1", "+tries=1", "+short", domain, recordType]
 
         let output = Pipe()
         process.standardOutput = output
@@ -194,6 +215,19 @@ final class DigDomainResolver: DomainIPResolving {
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func runDig(domain: String, recordType: String) -> [String] {
+        var orderedResults: [String] = []
+        var seen = Set<String>()
+
+        for _ in 0 ..< digAttemptsPerRecord {
+            for value in digCommand(domain, recordType) where seen.insert(value).inserted {
+                orderedResults.append(value)
+            }
+        }
+
+        return orderedResults
     }
 
     private func expandedDomains(from domains: [String]) -> [String] {

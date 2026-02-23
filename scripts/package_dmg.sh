@@ -38,8 +38,9 @@ guard CommandLine.arguments.count == 2 else {
 }
 
 let outputURL = URL(fileURLWithPath: CommandLine.arguments[1])
+let fileManager = FileManager()
 do {
-    try FileManager.default.createDirectory(
+    try fileManager.createDirectory(
         at: outputURL.deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
@@ -115,8 +116,9 @@ guard CommandLine.arguments.count == 3 else {
 
 let targetPath = CommandLine.arguments[1]
 let iconPath = CommandLine.arguments[2]
+let fileManager = FileManager()
 
-guard FileManager.default.fileExists(atPath: targetPath) else {
+guard fileManager.fileExists(atPath: targetPath) else {
     fputs("Target does not exist: \(targetPath)\n", stderr)
     exit(EXIT_FAILURE)
 }

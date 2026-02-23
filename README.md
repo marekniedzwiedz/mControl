@@ -36,6 +36,7 @@ mControl still manages a marker-based section inside `/etc/hosts`:
 - End marker: `# <<< mControl END`
 
 When active domains change, the app rewrites only that managed hosts section and also refreshes the PF anchor.
+PF IP resolution samples multiple DNS answers per domain to catch rotating CDN edge IPs more reliably.
 If DNS resolution temporarily returns no routable IPs, mControl reuses the last PF anchor IP set instead of weakening an active block.
 
 Because both `/etc/hosts` and `pf` updates are privileged, macOS prompts for administrator approval when changes are applied. Updates are batched into one elevated command to minimize repeated prompts.
