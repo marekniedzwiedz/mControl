@@ -9,7 +9,8 @@ let package = Package(
     ],
     products: [
         .library(name: "BlockingCore", targets: ["BlockingCore"]),
-        .executable(name: "mControlApp", targets: ["mControlApp"])
+        .executable(name: "mControlApp", targets: ["mControlApp"]),
+        .executable(name: "mControlPFDaemon", targets: ["mControlPFDaemon"])
     ],
     targets: [
         .target(
@@ -17,6 +18,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "mControlApp",
+            dependencies: ["BlockingCore"]
+        ),
+        .executableTarget(
+            name: "mControlPFDaemon",
             dependencies: ["BlockingCore"]
         ),
         .testTarget(

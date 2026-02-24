@@ -52,6 +52,38 @@ struct DigDomainResolverTests {
         #expect(resolved.ipv4 == Set(["198.51.100.20", "203.0.113.10"]))
         #expect(resolved.ipv6 == Set(["2001:db8::10", "2001:db8::20"]))
     }
+
+    @Test("follows CNAME chain from dig results to collect edge IPs")
+    func followsCnameChainFromDigResults() {
+        let resolver = DigDomainResolver(
+            digAttemptsPerRecord: 1,
+            systemResolve: { _ in ResolvedIPSet(ipv4: [], ipv6: []) },
+            digCommand: { domain, recordType in
+                guard recordType == "A" else {
+                    return []
+                }
+
+                if domain == "www.zalando-lounge.pl" {
+                    return ["www.zalando-lounge.pl.edgekey.net."]
+                }
+
+                if domain == "www.zalando-lounge.pl.edgekey.net" {
+                    return ["e10048238.a.akamaiedge.net."]
+                }
+
+                if domain == "e10048238.a.akamaiedge.net" {
+                    return ["95.101.116.8", "95.101.116.16", "95.101.116.20"]
+                }
+
+                return []
+            }
+        )
+
+        let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
+
+        #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.16", "95.101.116.20"]))
+        #expect(resolved.ipv6.isEmpty)
+    }
 }
 
 private final class RotatingARecordsDigStub {

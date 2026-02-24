@@ -8,6 +8,7 @@ The app is split into two layers:
 
 1. `BlockingCore` (`Sources/BlockingCore`)
 2. `mControlApp` (`Sources/mControlApp`)
+3. `mControlPFDaemon` (`Sources/mControlPFDaemon`)
 
 This separation keeps blocking logic deterministic and testable while isolating macOS UI and privileged integration in the app layer.
 
@@ -39,6 +40,8 @@ This separation keeps blocking logic deterministic and testable while isolating 
 - `HostsUpdater.swift`
   - Applies rendered hosts content with admin privileges via AppleScript.
   - Resolves blocked domains to IP addresses and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
+- `PFRefreshDaemonManager.swift`
+  - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs hourly PF refresh without repeated prompts.
 - `ContentView.swift`
   - Menubar popover UI with active sessions and group controls.
 - `GroupEditorView.swift`, `ScheduleIntervalView.swift`, `SettingsView.swift`
@@ -54,7 +57,9 @@ This separation keeps blocking logic deterministic and testable while isolating 
 
 ## Tradeoffs and current limitations
 
-- Blocking uses `/etc/hosts` plus PF anchor rules, both requiring admin prompts.
+- Blocking uses `/etc/hosts` plus PF anchor rules.
+- Session start/stop still requires privilege to update `/etc/hosts`.
+- Optional root PF daemon removes repeated hourly prompts for PF refresh by running under `launchd`.
 - PF rules depend on DNS resolution at apply time and may not cover all CDN edge/IP churn instantly.
 - Strict mode is app-enforced commitment; users with root access can still manually alter system files.
 

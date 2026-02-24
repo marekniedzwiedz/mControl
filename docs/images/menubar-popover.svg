@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="460" height="760" viewBox="0 0 460 760" role="img" aria-labelledby="title desc">
+  <title id="title">mControl menubar popover preview</title>
+  <desc id="desc">Illustrative preview of the menubar popover with all groups controls, active sessions, and settings buttons.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d2633"/>
+      <stop offset="100%" stop-color="#13394b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="460" height="760" fill="#0a1c27"/>
+  <rect x="10" y="12" width="440" height="736" rx="20" ry="20" fill="url(#panel)" stroke="#4f7388" stroke-width="2"/>
+
+  <text x="36" y="64" fill="#f4f8fa" font-size="42" font-weight="700" font-family="Avenir Next, sans-serif">mControl</text>
+  <rect x="334" y="30" width="96" height="44" rx="14" ry="14" fill="#86c9ad"/>
+  <text x="360" y="58" fill="#13313a" font-size="24" font-weight="700" font-family="Avenir Next, sans-serif">Active</text>
+
+  <rect x="24" y="96" width="412" height="144" rx="16" ry="16" fill="#163546" stroke="#3c6277" stroke-width="2"/>
+  <text x="38" y="130" fill="#e7f0f4" font-size="30" font-weight="700" font-family="Avenir Next, sans-serif">All Groups</text>
+  <rect x="38" y="148" width="56" height="34" rx="8" ry="8" fill="#86c9ad"/><text x="58" y="171" fill="#12303a" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">1h</text>
+  <rect x="104" y="148" width="56" height="34" rx="8" ry="8" fill="#86c9ad"/><text x="124" y="171" fill="#12303a" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">4h</text>
+  <rect x="170" y="148" width="66" height="34" rx="8" ry="8" fill="#86c9ad"/><text x="191" y="171" fill="#12303a" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">24h</text>
+  <rect x="246" y="148" width="56" height="34" rx="8" ry="8" fill="#86c9ad"/><text x="266" y="171" fill="#12303a" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">7d</text>
+  <text x="38" y="218" fill="#9bc7dd" font-size="24" font-family="Avenir Next, sans-serif">Custom</text>
+
+  <rect x="24" y="258" width="412" height="210" rx="16" ry="16" fill="#163546" stroke="#3c6277" stroke-width="2"/>
+  <text x="38" y="292" fill="#e7f0f4" font-size="30" font-weight="700" font-family="Avenir Next, sans-serif">Active Sessions</text>
+  <rect x="38" y="312" width="384" height="66" rx="12" ry="12" fill="#102a39"/>
+  <text x="50" y="352" fill="#f4f8fa" font-size="26" font-weight="600" font-family="Avenir Next, sans-serif">Focus work • 59m left</text>
+  <rect x="334" y="326" width="74" height="38" rx="10" ry="10" fill="#c45b44"/>
+  <text x="355" y="351" fill="#fff4f2" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">Stop</text>
+  <rect x="38" y="390" width="384" height="66" rx="12" ry="12" fill="#102a39"/>
+  <text x="50" y="430" fill="#f4f8fa" font-size="26" font-weight="600" font-family="Avenir Next, sans-serif">Social media • 1h left</text>
+
+  <rect x="24" y="486" width="412" height="190" rx="16" ry="16" fill="#163546" stroke="#3c6277" stroke-width="2"/>
+  <text x="38" y="520" fill="#e7f0f4" font-size="30" font-weight="700" font-family="Avenir Next, sans-serif">Groups</text>
+  <text x="300" y="520" fill="#9bc7dd" font-size="22" font-family="Avenir Next, sans-serif">Next change 13:00</text>
+  <text x="38" y="560" fill="#f4f8fa" font-size="26" font-weight="600" font-family="Avenir Next, sans-serif">Focus work</text>
+  <text x="300" y="560" fill="#86c9ad" font-size="22" font-family="Avenir Next, sans-serif">Active</text>
+  <rect x="38" y="576" width="56" height="32" rx="8" ry="8" fill="#86c9ad"/><text x="58" y="598" fill="#12303a" font-size="19" font-weight="700" font-family="Avenir Next, sans-serif">1h</text>
+  <rect x="102" y="576" width="56" height="32" rx="8" ry="8" fill="#86c9ad"/><text x="122" y="598" fill="#12303a" font-size="19" font-weight="700" font-family="Avenir Next, sans-serif">4h</text>
+  <rect x="166" y="576" width="66" height="32" rx="8" ry="8" fill="#86c9ad"/><text x="187" y="598" fill="#12303a" font-size="19" font-weight="700" font-family="Avenir Next, sans-serif">24h</text>
+  <rect x="240" y="576" width="56" height="32" rx="8" ry="8" fill="#86c9ad"/><text x="260" y="598" fill="#12303a" font-size="19" font-weight="700" font-family="Avenir Next, sans-serif">7d</text>
+  <text x="38" y="640" fill="#9bc7dd" font-size="24" font-family="Avenir Next, sans-serif">Custom</text>
+
+  <rect x="24" y="688" width="412" height="48" rx="14" ry="14" fill="#0f2d3d" stroke="#3c6277" stroke-width="2"/>
+  <text x="50" y="719" fill="#dbe9f2" font-size="22" font-family="Avenir Next, sans-serif">Settings</text>
+  <text x="192" y="719" fill="#dbe9f2" font-size="22" font-family="Avenir Next, sans-serif">Dashboard</text>
+  <text x="344" y="719" fill="#ffd8d1" font-size="22" font-family="Avenir Next, sans-serif">Quit</text>
+</svg>

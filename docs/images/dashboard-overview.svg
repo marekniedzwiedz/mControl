@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">mControl dashboard preview</title>
+  <desc id="desc">Illustrative preview of the mControl dashboard layout with hero stats, active sessions, and groups list.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0c2230" />
+      <stop offset="100%" stop-color="#16394a" />
+    </linearGradient>
+    <linearGradient id="card" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#123042" />
+      <stop offset="100%" stop-color="#0f2a39" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="720" fill="url(#bg)" />
+
+  <rect x="34" y="24" rx="18" ry="18" width="1132" height="156" fill="url(#card)" stroke="#3f5e6f" stroke-width="2"/>
+  <text x="64" y="74" fill="#f5f8fa" font-size="44" font-weight="700" font-family="Avenir Next, sans-serif">mControl</text>
+  <text x="66" y="110" fill="#aac1cf" font-size="24" font-family="Avenir Next, sans-serif">Menubar website blocker</text>
+  <text x="66" y="150" fill="#dff0f7" font-size="24" font-family="Avenir Next, sans-serif">Active Sessions: 2</text>
+  <text x="420" y="150" fill="#dff0f7" font-size="24" font-family="Avenir Next, sans-serif">Domains Blocked: 7</text>
+  <text x="780" y="150" fill="#dff0f7" font-size="24" font-family="Avenir Next, sans-serif">Next Change: 13:00</text>
+  <rect x="1000" y="58" rx="12" ry="12" width="140" height="48" fill="#86c9ad"/>
+  <text x="1030" y="90" fill="#0b2a2e" font-size="22" font-weight="700" font-family="Avenir Next, sans-serif">New Group</text>
+
+  <rect x="34" y="204" rx="18" ry="18" width="1132" height="180" fill="url(#card)" stroke="#3f5e6f" stroke-width="2"/>
+  <text x="62" y="250" fill="#f5f8fa" font-size="36" font-weight="700" font-family="Avenir Next, sans-serif">Active Sessions</text>
+  <rect x="62" y="272" rx="14" ry="14" width="1076" height="88" fill="#0b2331" stroke="#2f4d5e" stroke-width="2"/>
+  <text x="82" y="322" fill="#f5f8fa" font-size="30" font-weight="600" font-family="Avenir Next, sans-serif">Focus work</text>
+  <text x="382" y="322" fill="#8bd4b2" font-size="24" font-family="Avenir Next, sans-serif">Active • 1h 29m</text>
+  <rect x="998" y="294" rx="10" ry="10" width="120" height="44" fill="#c45b44"/>
+  <text x="1034" y="324" fill="#fff4f2" font-size="24" font-weight="700" font-family="Avenir Next, sans-serif">Stop</text>
+
+  <rect x="34" y="408" rx="18" ry="18" width="1132" height="280" fill="url(#card)" stroke="#3f5e6f" stroke-width="2"/>
+  <text x="62" y="454" fill="#f5f8fa" font-size="36" font-weight="700" font-family="Avenir Next, sans-serif">Groups</text>
+
+  <rect x="62" y="476" rx="14" ry="14" width="1076" height="88" fill="#0b2331" stroke="#2f4d5e" stroke-width="2"/>
+  <text x="82" y="527" fill="#f5f8fa" font-size="30" font-weight="600" font-family="Avenir Next, sans-serif">Focus work</text>
+  <text x="900" y="527" fill="#8bd4b2" font-size="24" font-family="Avenir Next, sans-serif">3 domains</text>
+  <rect x="82" y="540" rx="8" ry="8" width="76" height="32" fill="#86c9ad"/>
+  <text x="107" y="563" fill="#0f2a2e" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">1h</text>
+  <rect x="170" y="540" rx="8" ry="8" width="76" height="32" fill="#86c9ad"/>
+  <text x="195" y="563" fill="#0f2a2e" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">4h</text>
+  <rect x="258" y="540" rx="8" ry="8" width="90" height="32" fill="#86c9ad"/>
+  <text x="286" y="563" fill="#0f2a2e" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">24h</text>
+  <rect x="360" y="540" rx="8" ry="8" width="76" height="32" fill="#86c9ad"/>
+  <text x="386" y="563" fill="#0f2a2e" font-size="20" font-weight="700" font-family="Avenir Next, sans-serif">7d</text>
+
+  <rect x="62" y="578" rx="14" ry="14" width="1076" height="88" fill="#0b2331" stroke="#2f4d5e" stroke-width="2"/>
+  <text x="82" y="629" fill="#f5f8fa" font-size="30" font-weight="600" font-family="Avenir Next, sans-serif">Social media</text>
+  <text x="900" y="629" fill="#8bd4b2" font-size="24" font-family="Avenir Next, sans-serif">2 domains</text>
+</svg>

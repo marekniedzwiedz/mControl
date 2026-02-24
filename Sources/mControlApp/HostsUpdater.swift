@@ -86,6 +86,7 @@ final class DigDomainResolver: DomainIPResolving {
     private let digAttemptsPerRecord: Int
     private let systemResolve: SystemResolveFunction
     private let digCommand: DigCommandFunction
+    private let maxDigHostExpansions: Int = 16
 
     init(digPath: String = "/usr/bin/dig", digAttemptsPerRecord: Int = 4) {
         self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
@@ -123,15 +124,15 @@ final class DigDomainResolver: DomainIPResolving {
                 ipv6.insert(address)
             }
 
-            for line in runDig(domain: domain, recordType: "A") where isIPv4(line) {
-                if line != "0.0.0.0" && line != "127.0.0.1" {
-                    ipv4.insert(line)
+            for address in resolveDigIPs(domain: domain, recordType: "A") {
+                if address != "0.0.0.0" && address != "127.0.0.1" {
+                    ipv4.insert(address)
                 }
             }
 
-            for line in runDig(domain: domain, recordType: "AAAA") where isIPv6(line) {
-                if line != "::" && line != "::1" {
-                    ipv6.insert(line)
+            for address in resolveDigIPs(domain: domain, recordType: "AAAA") {
+                if address != "::" && address != "::1" {
+                    ipv6.insert(address)
                 }
             }
         }
@@ -228,6 +229,52 @@ final class DigDomainResolver: DomainIPResolving {
         }
 
         return orderedResults
+    }
+
+    private func resolveDigIPs(domain: String, recordType: String) -> [String] {
+        var queue: [String] = [domain]
+        var seenHosts = Set<String>()
+        if let normalized = DomainSanitizer.normalized(domain) {
+            seenHosts.insert(normalized)
+        } else {
+            seenHosts.insert(domain.lowercased())
+        }
+
+        var orderedIPResults: [String] = []
+        var seenIPs = Set<String>()
+
+        while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
+            let current = queue.removeFirst()
+            let responses = runDig(domain: current, recordType: recordType)
+
+            for value in responses {
+                if recordType == "A", isIPv4(value) {
+                    if seenIPs.insert(value).inserted {
+                        orderedIPResults.append(value)
+                    }
+                    continue
+                }
+
+                if recordType == "AAAA", isIPv6(value) {
+                    if seenIPs.insert(value).inserted {
+                        orderedIPResults.append(value)
+                    }
+                    continue
+                }
+
+                guard let cname = DomainSanitizer.normalized(value),
+                      !seenHosts.contains(cname),
+                      seenHosts.count < maxDigHostExpansions
+                else {
+                    continue
+                }
+
+                seenHosts.insert(cname)
+                queue.append(cname)
+            }
+        }
+
+        return orderedIPResults
     }
 
     private func expandedDomains(from domains: [String]) -> [String] {

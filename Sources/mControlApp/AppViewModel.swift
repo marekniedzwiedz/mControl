@@ -38,32 +38,49 @@ final class AppViewModel: ObservableObject {
     private let hostsUpdater: HostsUpdating
     private let hostsFileContentsProvider: () -> String?
     private let pfAnchorContentsProvider: () -> String?
+    private let dateProvider: () -> Date
+    private let periodicPFRefreshInterval: TimeInterval
+    private let forcedPeriodicSyncEnabledProvider: () -> Bool
     private var refreshTimer: Timer?
     private var lastAppliedDomains: [String] = []
     private var lastHostsApplyFailureDate: Date?
     private var isSystemSyncInProgress: Bool = false
     private var lastSuccessfulSystemSyncDate: Date?
+    private var lastPeriodicRefreshAttemptDate: Date?
 
     init(
         manager: BlockManager,
         hostsUpdater: HostsUpdating,
         hostsFileContentsProvider: @escaping () -> String? = AppViewModel.readSystemHostsFile,
-        pfAnchorContentsProvider: @escaping () -> String? = AppViewModel.readSystemPFAnchorFile
+        pfAnchorContentsProvider: @escaping () -> String? = AppViewModel.readSystemPFAnchorFile,
+        dateProvider: @escaping () -> Date = Date.init,
+        periodicPFRefreshInterval: TimeInterval = 3600,
+        forcedPeriodicSyncEnabledProvider: @escaping () -> Bool = { true }
     ) {
         self.manager = manager
         self.hostsUpdater = hostsUpdater
         self.hostsFileContentsProvider = hostsFileContentsProvider
         self.pfAnchorContentsProvider = pfAnchorContentsProvider
+        self.dateProvider = dateProvider
+        self.periodicPFRefreshInterval = max(60, periodicPFRefreshInterval)
+        self.forcedPeriodicSyncEnabledProvider = forcedPeriodicSyncEnabledProvider
 
-        loadStateWithoutHostsWrite()
-        synchronizeSystemStateOnLaunchIfNeeded()
+        let launchDate = dateProvider()
+        loadStateWithoutHostsWrite(currentDate: launchDate)
+        synchronizeSystemStateOnLaunchIfNeeded(referenceDate: launchDate)
         startTimer()
     }
 
     static func live() throws -> AppViewModel {
         let stateStore = JSONStateStore(fileURL: try JSONStateStore.defaultFileURL())
         let manager = try BlockManager(store: stateStore)
-        return AppViewModel(manager: manager, hostsUpdater: ManagedHostsUpdater())
+        return AppViewModel(
+            manager: manager,
+            hostsUpdater: ManagedHostsUpdater(),
+            forcedPeriodicSyncEnabledProvider: {
+                !PFRefreshDaemonManager.isInstalled()
+            }
+        )
     }
 
     static func fallbackWithError(_ message: String) -> AppViewModel {
@@ -227,6 +244,16 @@ final class AppViewModel: ObservableObject {
         snapshot.severity == .flexible
     }
 
+    func processTick() {
+        let tickDate = dateProvider()
+        if shouldRunPeriodicPFRefresh(at: tickDate) {
+            lastPeriodicRefreshAttemptDate = tickDate
+            reloadStateAndApplyHosts(forceHostWrite: true, referenceDate: tickDate)
+        } else {
+            reloadStateAndApplyHosts(forceHostWrite: false, referenceDate: tickDate)
+        }
+    }
+
     private func performMutationWithSystemRollback(successMessage: String, mutation: () throws -> Void) {
         let previousState = manager.snapshotState()
 
@@ -237,7 +264,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        let operationDate = Date()
+        let operationDate = dateProvider()
         let domainsAfterMutation = manager.activeDomains(at: operationDate)
         let shouldApplySystemChanges = domainsAfterMutation != lastAppliedDomains
 
@@ -250,20 +277,21 @@ final class AppViewModel: ObservableObject {
                 lastAppliedDomains = domainsAfterMutation
                 lastHostsApplyFailureDate = nil
                 lastSuccessfulSystemSyncDate = operationDate
+                lastPeriodicRefreshAttemptDate = operationDate
             } catch {
                 do {
                     try manager.restoreState(previousState)
                 } catch {
                     errorMessage = "System block sync failed and rollback could not be saved: \(error.localizedDescription)"
-                    refreshPublishedState(at: Date(), updateLastAppliedDomains: false)
+                    refreshPublishedState(at: dateProvider(), updateLastAppliedDomains: false)
                     refreshHostsStatus(for: activeDomains)
                     return
                 }
 
-                lastHostsApplyFailureDate = Date()
+                lastHostsApplyFailureDate = dateProvider()
                 infoMessage = nil
                 errorMessage = syncFailureMessage(for: error)
-                refreshPublishedState(at: Date(), updateLastAppliedDomains: false)
+                refreshPublishedState(at: dateProvider(), updateLastAppliedDomains: false)
                 refreshHostsStatus(for: activeDomains)
                 return
             }
@@ -273,15 +301,16 @@ final class AppViewModel: ObservableObject {
         reloadStateAndApplyHosts(forceHostWrite: false)
     }
 
-    private func synchronizeSystemStateOnLaunchIfNeeded() {
+    private func synchronizeSystemStateOnLaunchIfNeeded(referenceDate: Date) {
         if !activeDomains.isEmpty {
             // Ensure both /etc/hosts and PF anchor rules are re-applied after restart.
-            reloadStateAndApplyHosts(forceHostWrite: true)
+            lastPeriodicRefreshAttemptDate = referenceDate
+            reloadStateAndApplyHosts(forceHostWrite: true, referenceDate: referenceDate)
             return
         }
 
         if hostsFileNeedsSync(for: activeDomains) || pfAnchorNeedsCleanupWhenIdle() {
-            reloadStateAndApplyHosts(forceHostWrite: true)
+            reloadStateAndApplyHosts(forceHostWrite: true, referenceDate: referenceDate)
         }
     }
 
@@ -336,7 +365,7 @@ final class AppViewModel: ObservableObject {
                 return
             }
             Task { @MainActor in
-                self.reloadStateAndApplyHosts(forceHostWrite: false)
+                self.processTick()
             }
         }
 
@@ -344,8 +373,8 @@ final class AppViewModel: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    private func loadStateWithoutHostsWrite() {
-        let refreshDate = Date()
+    private func loadStateWithoutHostsWrite(currentDate: Date? = nil) {
+        let refreshDate = currentDate ?? dateProvider()
 
         do {
             try manager.pruneExpiredIntervals(referenceDate: refreshDate)
@@ -357,8 +386,8 @@ final class AppViewModel: ObservableObject {
         refreshHostsStatus(for: activeDomains)
     }
 
-    private func reloadStateAndApplyHosts(forceHostWrite: Bool) {
-        let refreshDate = Date()
+    private func reloadStateAndApplyHosts(forceHostWrite: Bool, referenceDate: Date? = nil) {
+        let refreshDate = referenceDate ?? dateProvider()
 
         do {
             try manager.pruneExpiredIntervals(referenceDate: refreshDate)
@@ -454,6 +483,29 @@ final class AppViewModel: ObservableObject {
             return true
         }
         return date.timeIntervalSince(lastHostsApplyFailureDate) >= 30
+    }
+
+    private func shouldRunPeriodicPFRefresh(at date: Date) -> Bool {
+        guard forcedPeriodicSyncEnabledProvider() else {
+            lastPeriodicRefreshAttemptDate = nil
+            return false
+        }
+
+        guard !activeDomains.isEmpty else {
+            lastPeriodicRefreshAttemptDate = nil
+            return false
+        }
+
+        guard !isSystemSyncInProgress else {
+            return false
+        }
+
+        let referenceDate = lastPeriodicRefreshAttemptDate ?? lastSuccessfulSystemSyncDate
+        guard let referenceDate else {
+            return false
+        }
+
+        return date.timeIntervalSince(referenceDate) >= periodicPFRefreshInterval
     }
 
     private func refreshHostsStatus(for domains: [String]) {

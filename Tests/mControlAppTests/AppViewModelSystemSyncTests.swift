@@ -86,6 +86,61 @@ struct AppViewModelSystemSyncTests {
     }
 
     @MainActor
+    @Test("active sessions trigger periodic system sync once interval elapses")
+    func activeSessionsTriggerPeriodicSystemSync() throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
+
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        _ = try manager.startNow(groupID: group.id, durationMinutes: 180, now: launchDate)
+
+        var currentDate = launchDate
+        let updater = RecordingHostsUpdater()
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: updater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { currentDate },
+            periodicPFRefreshInterval: 3600
+        )
+
+        #expect(updater.applyCallCount == 1)
+
+        currentDate = launchDate.addingTimeInterval(3599)
+        viewModel.processTick()
+        #expect(updater.applyCallCount == 1)
+
+        currentDate = launchDate.addingTimeInterval(3600)
+        viewModel.processTick()
+        #expect(updater.applyCallCount == 2)
+    }
+
+    @MainActor
+    @Test("no periodic sync runs when there are no active sessions")
+    func noPeriodicSyncWhenNoActiveSessions() throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        var currentDate = launchDate
+
+        let updater = RecordingHostsUpdater()
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: updater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { currentDate },
+            periodicPFRefreshInterval: 3600
+        )
+
+        #expect(updater.applyCallCount == 0)
+
+        currentDate = launchDate.addingTimeInterval(7200)
+        viewModel.processTick()
+        #expect(updater.applyCallCount == 0)
+    }
+
+    @MainActor
     @Test("start interval rolls back when admin authorization is canceled")
     func startIntervalRollsBackWhenAdminAuthorizationIsCanceled() throws {
         let manager = try BlockManager(store: InMemoryStateStore())

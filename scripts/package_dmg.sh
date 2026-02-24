@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 APP_NAME="${APP_NAME:-mControl}"
 PRODUCT_NAME="${PRODUCT_NAME:-mControlApp}"
+DAEMON_PRODUCT_NAME="${DAEMON_PRODUCT_NAME:-mControlPFDaemon}"
 BUNDLE_ID="${BUNDLE_ID:-com.mcontrol.app}"
 APP_VERSION="${APP_VERSION:-1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
@@ -138,7 +139,7 @@ SWIFT
 echo "Generating icon assets..."
 render_icon_png "$ICON_PNG_PATH"
 
-echo "Building $PRODUCT_NAME ($CONFIGURATION)..."
+echo "Building $PRODUCT_NAME and $DAEMON_PRODUCT_NAME ($CONFIGURATION)..."
 swift build \
     -c "$CONFIGURATION" \
     --product "$PRODUCT_NAME" \
@@ -150,11 +151,23 @@ swift build \
     --security-path "$SECURITY_DIR" \
     --manifest-cache local
 
-find_binary() {
+swift build \
+    -c "$CONFIGURATION" \
+    --product "$DAEMON_PRODUCT_NAME" \
+    --package-path "$ROOT_DIR" \
+    --disable-sandbox \
+    --scratch-path "$ROOT_DIR/.build" \
+    --cache-path "$CACHE_DIR" \
+    --config-path "$CONFIG_DIR" \
+    --security-path "$SECURITY_DIR" \
+    --manifest-cache local
+
+find_product_binary() {
+    local product_name="$1"
     local candidate
     for candidate in \
-        "$ROOT_DIR/.build/arm64-apple-macosx/$CONFIGURATION/$PRODUCT_NAME" \
-        "$ROOT_DIR/.build/$CONFIGURATION/$PRODUCT_NAME"
+        "$ROOT_DIR/.build/arm64-apple-macosx/$CONFIGURATION/$product_name" \
+        "$ROOT_DIR/.build/$CONFIGURATION/$product_name"
     do
         if [[ -x "$candidate" ]]; then
             echo "$candidate"
@@ -165,9 +178,15 @@ find_binary() {
     return 1
 }
 
-BINARY_PATH="$(find_binary || true)"
+BINARY_PATH="$(find_product_binary "$PRODUCT_NAME" || true)"
 if [[ -z "$BINARY_PATH" ]]; then
     echo "Could not locate built executable for $PRODUCT_NAME."
+    exit 1
+fi
+
+DAEMON_BINARY_PATH="$(find_product_binary "$DAEMON_PRODUCT_NAME" || true)"
+if [[ -z "$DAEMON_BINARY_PATH" ]]; then
+    echo "Could not locate built executable for $DAEMON_PRODUCT_NAME."
     exit 1
 fi
 
@@ -176,6 +195,8 @@ rm -rf "$APP_BUNDLE_PATH"
 mkdir -p "$APP_BUNDLE_PATH/Contents/MacOS" "$APP_BUNDLE_PATH/Contents/Resources"
 cp "$BINARY_PATH" "$APP_BUNDLE_PATH/Contents/MacOS/$PRODUCT_NAME"
 chmod +x "$APP_BUNDLE_PATH/Contents/MacOS/$PRODUCT_NAME"
+cp "$DAEMON_BINARY_PATH" "$APP_BUNDLE_PATH/Contents/Resources/$DAEMON_PRODUCT_NAME"
+chmod +x "$APP_BUNDLE_PATH/Contents/Resources/$DAEMON_PRODUCT_NAME"
 
 cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
