@@ -42,7 +42,7 @@ Menubar popover layout:
 5. Start a session from:
    - Dashboard group card (`1h`, `4h`, `24h`, `7d`, or `Custom`).
    - Menubar popover (`All Groups` or per-group quick buttons).
-6. Optional but recommended: in `Settings`, install `Background PF Refresh` daemon to avoid hourly password prompts for PF refresh.
+6. Optional but recommended: in `Settings`, install `Background PF Refresh` daemon to avoid repeated password prompts for PF refresh.
 
 ## Where To Create Groups
 
@@ -91,7 +91,7 @@ Because `/etc/hosts` updates are privileged, macOS prompts for administrator app
 If admin authorization is canceled, mControl rolls back the attempted UI/state change so sessions are not shown as active/stopped unless system blocking actually succeeded.
 On app launch, if any session is active, mControl forces one startup sync to re-assert both hosts and PF rules.
 When the background PF daemon is not installed, the app also forces a periodic background re-sync every 1 hour (which may prompt for admin password again).
-When the daemon is installed from Settings, hourly PF refresh is handled by root `launchd` (`com.mcontrol.pfrefresh`) without repeated prompts.
+When the daemon is installed from Settings, PF refresh is handled by root `launchd` (`com.mcontrol.pfrefresh`) every 1 minute without repeated prompts.
 If no session is active but a stale mControl PF anchor is detected, launch also triggers a cleanup sync.
 
 ### Background PF daemon
@@ -108,7 +108,7 @@ Why it exists:
 - CDN-backed sites rotate destination IPs.
 - Hosts file rules can be bypassed by modern browser DNS behavior.
 - PF needs periodic IP refresh for active domains.
-- Daemon runs PF refresh hourly as root (`launchd`) so app does not need to prompt every hour.
+- Daemon runs PF refresh every 1 minute as root (`launchd`) so app does not need repeated prompts.
 
 Verification:
 

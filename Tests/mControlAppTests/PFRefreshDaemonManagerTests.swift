@@ -4,13 +4,13 @@ import Testing
 
 @Suite("PFRefreshDaemonManager")
 struct PFRefreshDaemonManagerTests {
-    @Test("launchd plist contains expected label, binary path, and 1h interval")
+    @Test("launchd plist contains expected label, binary path, and 1m interval")
     func launchdPlistContainsExpectedSettings() {
         let content = PFRefreshDaemonManager.launchDaemonPlistContent()
 
         #expect(content.contains("<string>com.mcontrol.pfrefresh</string>"))
         #expect(content.contains("<string>/Library/PrivilegedHelperTools/com.mcontrol.pfrefresh</string>"))
-        #expect(content.contains("<integer>3600</integer>"))
+        #expect(content.contains("<integer>60</integer>"))
     }
 
     @Test("isInstalled requires both binary and launchd plist")

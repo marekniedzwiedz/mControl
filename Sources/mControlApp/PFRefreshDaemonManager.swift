@@ -21,6 +21,7 @@ enum PFRefreshDaemonManager {
     static let launchDaemonLabel = "com.mcontrol.pfrefresh"
     static let installedBinaryPath = "/Library/PrivilegedHelperTools/com.mcontrol.pfrefresh"
     static let launchDaemonPlistPath = "/Library/LaunchDaemons/com.mcontrol.pfrefresh.plist"
+    static let refreshIntervalSeconds: Int = 60
     private static let bundledBinaryName = "mControlPFDaemon"
 
     static func isInstalled(
@@ -93,7 +94,7 @@ enum PFRefreshDaemonManager {
             <key>RunAtLoad</key>
             <true/>
             <key>StartInterval</key>
-            <integer>3600</integer>
+            <integer>\(refreshIntervalSeconds)</integer>
             <key>StandardOutPath</key>
             <string>/var/log/\(launchDaemonLabel).log</string>
             <key>StandardErrorPath</key>

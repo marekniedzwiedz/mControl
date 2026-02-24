@@ -61,7 +61,7 @@ struct SettingsView: View {
                         .font(.custom("Avenir Next Medium", size: 13))
                     }
 
-                    Text("Installs a root launchd job to refresh PF rules every 1 hour without repeated password prompts.")
+                    Text("Installs a root launchd job to refresh PF rules every 1 minute without repeated password prompts.")
                         .font(.custom("Avenir Next Regular", size: 12))
                         .foregroundStyle(.secondary)
 
@@ -158,7 +158,7 @@ struct SettingsView: View {
             try PFRefreshDaemonManager.installOrUpdate()
             daemonInstalled = PFRefreshDaemonManager.isInstalled()
             daemonStatusMessage = daemonInstalled
-                ? "PF daemon installed. Hourly PF refresh now runs in background."
+                ? "PF daemon installed. PF refresh now runs every 1 minute in background."
                 : "Daemon install command completed, but files were not detected."
         } catch {
             daemonInstalled = PFRefreshDaemonManager.isInstalled()

@@ -39,11 +39,18 @@ private final class DigDomainResolver {
     private let digAttemptsPerRecord: Int
     private let maxDigHostExpansions: Int
     private let doHTimeoutSeconds: Int
+    private let doHAttemptsPerRecord: Int
 
-    init(digAttemptsPerRecord: Int = 4, maxDigHostExpansions: Int = 16, doHTimeoutSeconds: Int = 2) {
+    init(
+        digAttemptsPerRecord: Int = 4,
+        maxDigHostExpansions: Int = 16,
+        doHTimeoutSeconds: Int = 2,
+        doHAttemptsPerRecord: Int = 2
+    ) {
         self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
         self.maxDigHostExpansions = max(1, maxDigHostExpansions)
         self.doHTimeoutSeconds = max(1, doHTimeoutSeconds)
+        self.doHAttemptsPerRecord = max(1, doHAttemptsPerRecord)
     }
 
     func resolveIPAddresses(for domains: [String]) -> ResolvedIPSet {
@@ -146,8 +153,11 @@ private final class DigDomainResolver {
         let googleURL = "https://dns.google/resolve?name=\(encodedDomain)&type=\(recordType)"
         let cloudflareURL = "https://cloudflare-dns.com/dns-query?name=\(encodedDomain)&type=\(recordType)"
 
-        let responses = runDoHProcess(urlString: googleURL, headers: [])
-            + runDoHProcess(urlString: cloudflareURL, headers: ["accept: application/dns-json"])
+        var responses: [String] = []
+        for _ in 0 ..< doHAttemptsPerRecord {
+            responses.append(contentsOf: runDoHProcess(urlString: googleURL, headers: []))
+            responses.append(contentsOf: runDoHProcess(urlString: cloudflareURL, headers: ["accept: application/dns-json"]))
+        }
 
         var orderedResults: [String] = []
         var seen = Set<String>()
@@ -246,7 +256,7 @@ private final class DigDomainResolver {
         while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
             let current = queue.removeFirst()
             var responses = runDig(domain: current, recordType: recordType)
-            if current == domain {
+            if recordType == "A", current == domain {
                 responses.append(contentsOf: runDoH(domain: current, recordType: recordType))
             }
 

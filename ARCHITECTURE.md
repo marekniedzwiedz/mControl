@@ -42,7 +42,7 @@ This separation keeps blocking logic deterministic and testable while isolating 
   - Resolves blocked domains to IP addresses (system DNS + `dig` + DoH) and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
   - Kills existing PF states for blocked destination IPs so active browser connections cannot survive newly-started blocks.
 - `PFRefreshDaemonManager.swift`
-  - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs hourly PF refresh without repeated prompts.
+  - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs PF refresh every 1 minute without repeated prompts.
 - `ContentView.swift`
   - Menubar popover UI with active sessions and group controls.
 - `GroupEditorView.swift`, `ScheduleIntervalView.swift`, `SettingsView.swift`
@@ -60,7 +60,7 @@ This separation keeps blocking logic deterministic and testable while isolating 
 
 - Blocking uses `/etc/hosts` plus PF anchor rules.
 - Session start/stop still requires privilege to update `/etc/hosts`.
-- Optional root PF daemon removes repeated hourly prompts for PF refresh by running under `launchd`.
+- Optional root PF daemon removes repeated prompts for PF refresh by running under `launchd`.
 - PF rules depend on DNS resolution at apply time and may not cover all CDN edge/IP churn instantly.
 - Strict mode is app-enforced commitment; users with root access can still manually alter system files.
 
