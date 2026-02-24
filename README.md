@@ -83,8 +83,9 @@ mControl still manages a marker-based section inside `/etc/hosts`:
 - End marker: `# <<< mControl END`
 
 When active domains change, the app rewrites only that managed hosts section and also refreshes the PF anchor.
-PF IP resolution samples multiple DNS answers per domain and follows CNAME chain targets to catch rotating CDN edge IPs more reliably.
+PF IP resolution samples multiple DNS answers per domain, queries public DoH resolvers, and follows CNAME chain targets to catch rotating CDN edge IPs more reliably.
 If DNS resolution temporarily returns no routable IPs, mControl reuses the last PF anchor IP set instead of weakening an active block.
+After PF reload, mControl also kills existing PF states for blocked destination IPs so already-open browser connections do not bypass a newly started block.
 
 Because `/etc/hosts` updates are privileged, macOS prompts for administrator approval when session state changes are applied.
 If admin authorization is canceled, mControl rolls back the attempted UI/state change so sessions are not shown as active/stopped unless system blocking actually succeeded.

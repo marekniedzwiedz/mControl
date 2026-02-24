@@ -82,10 +82,12 @@ final class AppleScriptPrivilegedCommandRunner: PrivilegedCommandRunning {
 final class DigDomainResolver: DomainIPResolving {
     typealias SystemResolveFunction = (String) -> ResolvedIPSet
     typealias DigCommandFunction = (String, String) -> [String]
+    typealias DoHQueryFunction = (String, String) -> [String]
 
     private let digAttemptsPerRecord: Int
     private let systemResolve: SystemResolveFunction
     private let digCommand: DigCommandFunction
+    private let doHQuery: DoHQueryFunction
     private let maxDigHostExpansions: Int = 16
 
     init(digPath: String = "/usr/bin/dig", digAttemptsPerRecord: Int = 4) {
@@ -96,16 +98,21 @@ final class DigDomainResolver: DomainIPResolving {
         self.digCommand = { domain, recordType in
             DigDomainResolver.runDigProcess(digPath: digPath, domain: domain, recordType: recordType)
         }
+        self.doHQuery = { domain, recordType in
+            DigDomainResolver.runDoHQueries(domain: domain, recordType: recordType)
+        }
     }
 
     init(
         digAttemptsPerRecord: Int = 4,
         systemResolve: @escaping SystemResolveFunction,
-        digCommand: @escaping DigCommandFunction
+        digCommand: @escaping DigCommandFunction,
+        doHQuery: @escaping DoHQueryFunction = { _, _ in [] }
     ) {
         self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
         self.systemResolve = systemResolve
         self.digCommand = digCommand
+        self.doHQuery = doHQuery
     }
 
     func resolveIPAddresses(for domains: [String]) -> ResolvedIPSet {
@@ -218,6 +225,67 @@ final class DigDomainResolver: DomainIPResolving {
             .filter { !$0.isEmpty }
     }
 
+    private static func runDoHQueries(domain: String, recordType: String) -> [String] {
+        guard let encodedDomain = domain.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return []
+        }
+
+        let googleURL = "https://dns.google/resolve?name=\(encodedDomain)&type=\(recordType)"
+        let cloudflareURL = "https://cloudflare-dns.com/dns-query?name=\(encodedDomain)&type=\(recordType)"
+
+        let responses = runDoHProcess(urlString: googleURL, headers: [])
+            + runDoHProcess(urlString: cloudflareURL, headers: ["accept: application/dns-json"])
+
+        var orderedResults: [String] = []
+        var seen = Set<String>()
+        for value in responses where seen.insert(value).inserted {
+            orderedResults.append(value)
+        }
+        return orderedResults
+    }
+
+    private static func runDoHProcess(urlString: String, headers: [String]) -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+
+        var arguments = ["-m", "2", "-sS"]
+        for header in headers {
+            arguments.append(contentsOf: ["-H", header])
+        }
+        arguments.append(urlString)
+        process.arguments = arguments
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return []
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            return []
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let answerArray = jsonObject["Answer"] as? [[String: Any]]
+        else {
+            return []
+        }
+
+        return answerArray.compactMap { entry in
+            guard let value = entry["data"] as? String else {
+                return nil
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
     private func runDig(domain: String, recordType: String) -> [String] {
         var orderedResults: [String] = []
         var seen = Set<String>()
@@ -226,6 +294,17 @@ final class DigDomainResolver: DomainIPResolving {
             for value in digCommand(domain, recordType) where seen.insert(value).inserted {
                 orderedResults.append(value)
             }
+        }
+
+        return orderedResults
+    }
+
+    private func runDoH(domain: String, recordType: String) -> [String] {
+        var orderedResults: [String] = []
+        var seen = Set<String>()
+
+        for value in doHQuery(domain, recordType) where seen.insert(value).inserted {
+            orderedResults.append(value)
         }
 
         return orderedResults
@@ -245,9 +324,15 @@ final class DigDomainResolver: DomainIPResolving {
 
         while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
             let current = queue.removeFirst()
-            let responses = runDig(domain: current, recordType: recordType)
+            var responses = runDig(domain: current, recordType: recordType)
+            if current == domain {
+                responses.append(contentsOf: runDoH(domain: current, recordType: recordType))
+            }
 
-            for value in responses {
+            var seenResponses = Set<String>()
+            let mergedResponses = responses.filter { seenResponses.insert($0).inserted }
+
+            for value in mergedResponses {
                 if recordType == "A", isIPv4(value) {
                     if seenIPs.insert(value).inserted {
                         orderedIPResults.append(value)
@@ -411,6 +496,14 @@ final class ManagedHostsUpdater: HostsUpdating {
             commandSegments.append(
                 "cp \(shellQuote(tempPFURL.path)) \(shellQuote(pfAnchorPath)) && pfctl -q -a \(shellQuote(pfAnchorName)) -f \(shellQuote(pfAnchorPath)) && (pfctl -s info | grep -q 'Status: Enabled' || pfctl -E)"
             )
+
+            let killStateCommands = renderPFStateKillCommands(
+                ipv4: effectiveResolvedIPs.ipv4,
+                ipv6: effectiveResolvedIPs.ipv6
+            )
+            if !killStateCommands.isEmpty {
+                commandSegments.append(killStateCommands.joined(separator: " && "))
+            }
         }
 
         if !commandSegments.isEmpty {
@@ -449,6 +542,20 @@ final class ManagedHostsUpdater: HostsUpdating {
         }
 
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private func renderPFStateKillCommands(ipv4: Set<String>, ipv6: Set<String>) -> [String] {
+        var commands: [String] = []
+
+        for address in ipv4.sorted() {
+            commands.append("pfctl -k 0.0.0.0/0 -k \(shellQuote(address)) >/dev/null 2>&1 || true")
+        }
+
+        for address in ipv6.sorted() {
+            commands.append("pfctl -k ::/0 -k \(shellQuote(address)) >/dev/null 2>&1 || true")
+        }
+
+        return commands
     }
 
     private func readExistingPFAnchorResolvedIPs() -> ResolvedIPSet {

@@ -38,10 +38,12 @@ private enum Constants {
 private final class DigDomainResolver {
     private let digAttemptsPerRecord: Int
     private let maxDigHostExpansions: Int
+    private let doHTimeoutSeconds: Int
 
-    init(digAttemptsPerRecord: Int = 4, maxDigHostExpansions: Int = 16) {
+    init(digAttemptsPerRecord: Int = 4, maxDigHostExpansions: Int = 16, doHTimeoutSeconds: Int = 2) {
         self.digAttemptsPerRecord = max(1, digAttemptsPerRecord)
         self.maxDigHostExpansions = max(1, maxDigHostExpansions)
+        self.doHTimeoutSeconds = max(1, doHTimeoutSeconds)
     }
 
     func resolveIPAddresses(for domains: [String]) -> ResolvedIPSet {
@@ -136,6 +138,25 @@ private final class DigDomainResolver {
         return orderedResults
     }
 
+    private func runDoH(domain: String, recordType: String) -> [String] {
+        guard let encodedDomain = domain.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return []
+        }
+
+        let googleURL = "https://dns.google/resolve?name=\(encodedDomain)&type=\(recordType)"
+        let cloudflareURL = "https://cloudflare-dns.com/dns-query?name=\(encodedDomain)&type=\(recordType)"
+
+        let responses = runDoHProcess(urlString: googleURL, headers: [])
+            + runDoHProcess(urlString: cloudflareURL, headers: ["accept: application/dns-json"])
+
+        var orderedResults: [String] = []
+        var seen = Set<String>()
+        for value in responses where seen.insert(value).inserted {
+            orderedResults.append(value)
+        }
+        return orderedResults
+    }
+
     private func runDigProcess(domain: String, recordType: String) -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Constants.digPath)
@@ -167,6 +188,48 @@ private final class DigDomainResolver {
             .filter { !$0.isEmpty }
     }
 
+    private func runDoHProcess(urlString: String, headers: [String]) -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+
+        var arguments = ["-m", "\(doHTimeoutSeconds)", "-sS"]
+        for header in headers {
+            arguments.append(contentsOf: ["-H", header])
+        }
+        arguments.append(urlString)
+        process.arguments = arguments
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return []
+        }
+
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            return []
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        guard let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let answerArray = jsonObject["Answer"] as? [[String: Any]]
+        else {
+            return []
+        }
+
+        return answerArray.compactMap { entry in
+            guard let value = entry["data"] as? String else {
+                return nil
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
     private func resolveDigIPs(domain: String, recordType: String) -> [String] {
         var queue: [String] = [domain]
         var seenHosts = Set<String>()
@@ -182,9 +245,15 @@ private final class DigDomainResolver {
 
         while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
             let current = queue.removeFirst()
-            let responses = runDig(domain: current, recordType: recordType)
+            var responses = runDig(domain: current, recordType: recordType)
+            if current == domain {
+                responses.append(contentsOf: runDoH(domain: current, recordType: recordType))
+            }
 
-            for value in responses {
+            var seenResponses = Set<String>()
+            let mergedResponses = responses.filter { seenResponses.insert($0).inserted }
+
+            for value in mergedResponses {
                 if recordType == "A", isIPv4(value) {
                     if seenIPs.insert(value).inserted {
                         orderedIPs.append(value)
@@ -429,8 +498,19 @@ private func runDaemonRefresh() throws {
         ["-c", "/sbin/pfctl -s info | /usr/bin/grep -q 'Status: Enabled' || /sbin/pfctl -E"],
         allowFailure: true
     )
+    try killPFStates(ipv4: effective.ipv4, ipv6: effective.ipv6)
 
     print("mControlPFDaemon: refreshed PF entries for \(domains.count) domain(s), ipv4=\(effective.ipv4.count), ipv6=\(effective.ipv6.count)")
+}
+
+private func killPFStates(ipv4: Set<String>, ipv6: Set<String>) throws {
+    for address in ipv4.sorted() {
+        _ = try runCommand("/sbin/pfctl", ["-k", "0.0.0.0/0", "-k", address], allowFailure: true)
+    }
+
+    for address in ipv6.sorted() {
+        _ = try runCommand("/sbin/pfctl", ["-k", "::/0", "-k", address], allowFailure: true)
+    }
 }
 
 do {

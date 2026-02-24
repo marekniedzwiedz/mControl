@@ -39,7 +39,8 @@ This separation keeps blocking logic deterministic and testable while isolating 
   - Coordinates user actions, periodic refresh, and host synchronization.
 - `HostsUpdater.swift`
   - Applies rendered hosts content with admin privileges via AppleScript.
-  - Resolves blocked domains to IP addresses and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
+  - Resolves blocked domains to IP addresses (system DNS + `dig` + DoH) and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
+  - Kills existing PF states for blocked destination IPs so active browser connections cannot survive newly-started blocks.
 - `PFRefreshDaemonManager.swift`
   - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs hourly PF refresh without repeated prompts.
 - `ContentView.swift`

@@ -84,6 +84,36 @@ struct DigDomainResolverTests {
         #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.16", "95.101.116.20"]))
         #expect(resolved.ipv6.isEmpty)
     }
+
+    @Test("merges DoH answers with dig answers for better CDN coverage")
+    func mergesDoHAnswersWithDigAnswers() {
+        let resolver = DigDomainResolver(
+            digAttemptsPerRecord: 1,
+            systemResolve: { _ in ResolvedIPSet(ipv4: [], ipv6: []) },
+            digCommand: { domain, recordType in
+                guard recordType == "A" else {
+                    return []
+                }
+                if domain == "www.zalando-lounge.pl" {
+                    return ["e10048238.a.akamaiedge.net.", "95.101.116.8", "95.101.116.16"]
+                }
+                if domain == "e10048238.a.akamaiedge.net" {
+                    return ["95.101.116.8", "95.101.116.16"]
+                }
+                return []
+            },
+            doHQuery: { domain, recordType in
+                if domain == "www.zalando-lounge.pl", recordType == "A" {
+                    return ["95.101.116.11"]
+                }
+                return []
+            }
+        )
+
+        let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
+
+        #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.11", "95.101.116.16"]))
+    }
 }
 
 private final class RotatingARecordsDigStub {

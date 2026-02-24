@@ -45,6 +45,7 @@ struct ManagedHostsUpdaterTests {
         let lastCommand = try #require(runner.lastCommand)
         #expect(lastCommand.contains("mcontrol-pf-"))
         #expect(lastCommand.contains("pfctl -q -a"))
+        #expect(lastCommand.contains("pfctl -k 0.0.0.0/0 -k '104.244.42.1'"))
         #expect(!lastCommand.contains("-F all"))
 
         // Resolver returned empty, so PF update command proves fallback IPs were
