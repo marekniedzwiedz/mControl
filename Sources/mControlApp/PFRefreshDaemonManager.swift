@@ -18,6 +18,20 @@ enum PFRefreshDaemonError: LocalizedError {
 }
 
 enum PFRefreshDaemonManager {
+    enum InstallationState: Equatable {
+        case notInstalled
+        case installedOutdated
+        case installedCurrent
+
+        var isInstalled: Bool {
+            self != .notInstalled
+        }
+
+        var isUpToDate: Bool {
+            self == .installedCurrent
+        }
+    }
+
     static let launchDaemonLabel = "com.mcontrol.pfrefresh"
     static let installedBinaryPath = "/Library/PrivilegedHelperTools/com.mcontrol.pfrefresh"
     static let launchDaemonPlistPath = "/Library/LaunchDaemons/com.mcontrol.pfrefresh.plist"
@@ -34,6 +48,47 @@ enum PFRefreshDaemonManager {
 
         return fileManager.fileExists(atPath: installedBinaryPath) &&
             fileManager.fileExists(atPath: launchDaemonPlistPath)
+    }
+
+    static func installationState(
+        fileManager: FileManager = .default,
+        installedBinaryPathOverride: String? = nil,
+        launchDaemonPlistPathOverride: String? = nil,
+        bundledBinaryURLOverride: URL? = nil
+    ) -> InstallationState {
+        let installedBinaryPath = installedBinaryPathOverride ?? self.installedBinaryPath
+        let launchDaemonPlistPath = launchDaemonPlistPathOverride ?? self.launchDaemonPlistPath
+
+        let hasBinary = fileManager.fileExists(atPath: installedBinaryPath)
+        let hasPlist = fileManager.fileExists(atPath: launchDaemonPlistPath)
+
+        guard hasBinary || hasPlist else {
+            return .notInstalled
+        }
+
+        guard hasBinary, hasPlist else {
+            return .installedOutdated
+        }
+
+        guard plistMatchesExpectedConfiguration(
+            fileManager: fileManager,
+            plistPath: launchDaemonPlistPath,
+            installedBinaryPath: installedBinaryPath
+        ) else {
+            return .installedOutdated
+        }
+
+        guard let bundledBinaryURL = bundledBinaryURLOverride ?? bundledBinaryURL(fileManager: fileManager),
+              filesMatch(
+                  fileManager: fileManager,
+                  firstPath: installedBinaryPath,
+                  secondPath: bundledBinaryURL.path
+              )
+        else {
+            return .installedOutdated
+        }
+
+        return .installedCurrent
     }
 
     @MainActor
@@ -124,6 +179,50 @@ enum PFRefreshDaemonManager {
             return nil
         }
         return fallbackURL
+    }
+
+    private static func filesMatch(fileManager: FileManager, firstPath: String, secondPath: String) -> Bool {
+        guard let firstData = fileManager.contents(atPath: firstPath),
+              let secondData = fileManager.contents(atPath: secondPath)
+        else {
+            return false
+        }
+        return firstData == secondData
+    }
+
+    private static func plistMatchesExpectedConfiguration(
+        fileManager: FileManager,
+        plistPath: String,
+        installedBinaryPath: String
+    ) -> Bool {
+        guard let data = fileManager.contents(atPath: plistPath),
+              let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
+              let plist = object as? [String: Any]
+        else {
+            return false
+        }
+
+        guard let label = plist["Label"] as? String, label == launchDaemonLabel else {
+            return false
+        }
+
+        guard let arguments = plist["ProgramArguments"] as? [String],
+              arguments.first == installedBinaryPath
+        else {
+            return false
+        }
+
+        let startInterval: Int? = {
+            if let intValue = plist["StartInterval"] as? Int {
+                return intValue
+            }
+            if let numberValue = plist["StartInterval"] as? NSNumber {
+                return numberValue.intValue
+            }
+            return nil
+        }()
+
+        return startInterval == refreshIntervalSeconds
     }
 
     private static func shellQuote(_ value: String) -> String {

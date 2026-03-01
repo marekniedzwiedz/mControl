@@ -40,10 +40,14 @@ This separation keeps blocking logic deterministic and testable while isolating 
 - `HostsUpdater.swift`
   - Applies rendered hosts content with admin privileges via AppleScript.
   - Resolves blocked domains to IP addresses (system DNS + `dig` + DoH) and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
+  - Uses aggressive DoH ECS sampling for Akamai-style CNAME chain hosts to increase edge IP coverage.
+  - For fast-rotating CDN hosts, increases repeated resolver sampling and retains larger rolling PF unions for longer windows to reduce edge-IP miss gaps.
+  - Derives `/24` CIDR entries for high-churn IPv4 pools and writes them to PF to catch rapid same-subnet edge swaps.
   - Keeps a rolling PF IP union for unchanged active domain sets, reducing unblock windows caused by CDN edge rotation.
   - Kills existing PF states for blocked destination IPs so active browser connections cannot survive newly-started blocks.
 - `PFRefreshDaemonManager.swift`
   - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs PF refresh every 1 minute without repeated prompts.
+  - Detects stale daemon installs (binary/plist drift) so app can avoid trusting outdated background refresh.
 - `ContentView.swift`
   - Menubar popover UI with active sessions and group controls.
 - `GroupEditorView.swift`, `ScheduleIntervalView.swift`, `SettingsView.swift`

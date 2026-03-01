@@ -74,11 +74,22 @@ final class AppViewModel: ObservableObject {
     static func live() throws -> AppViewModel {
         let stateStore = JSONStateStore(fileURL: try JSONStateStore.defaultFileURL())
         let manager = try BlockManager(store: stateStore)
+        let daemonStateAtLaunch = PFRefreshDaemonManager.installationState()
+
+        // If daemon files exist but are stale versus bundled resources, try one-shot repair.
+        if daemonStateAtLaunch == .installedOutdated {
+            try? PFRefreshDaemonManager.installOrUpdate()
+        }
+
+        let forcedPeriodicInterval: TimeInterval =
+            daemonStateAtLaunch == .installedOutdated ? 60 : 3600
+
         return AppViewModel(
             manager: manager,
             hostsUpdater: ManagedHostsUpdater(),
+            periodicPFRefreshInterval: forcedPeriodicInterval,
             forcedPeriodicSyncEnabledProvider: {
-                !PFRefreshDaemonManager.isInstalled()
+                !PFRefreshDaemonManager.installationState().isUpToDate
             }
         )
     }

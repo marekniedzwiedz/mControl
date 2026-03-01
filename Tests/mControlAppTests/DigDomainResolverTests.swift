@@ -25,7 +25,7 @@ struct DigDomainResolverTests {
 
         let resolved = resolver.resolveIPAddresses(for: ["https://www.zalando-lounge.pl/event"])
 
-        #expect(resolved.ipv4 == Set(["95.101.116.16", "95.101.116.20", "95.101.116.21"]))
+        #expect(Set(["95.101.116.16", "95.101.116.20", "95.101.116.21"]).isSubset(of: resolved.ipv4))
         #expect(resolved.ipv6.isEmpty)
     }
 
@@ -81,7 +81,7 @@ struct DigDomainResolverTests {
 
         let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
 
-        #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.16", "95.101.116.20"]))
+        #expect(Set(["95.101.116.8", "95.101.116.16", "95.101.116.20"]).isSubset(of: resolved.ipv4))
         #expect(resolved.ipv6.isEmpty)
     }
 
@@ -112,7 +112,7 @@ struct DigDomainResolverTests {
 
         let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
 
-        #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.11", "95.101.116.16"]))
+        #expect(Set(["95.101.116.8", "95.101.116.11", "95.101.116.16"]).isSubset(of: resolved.ipv4))
     }
 
     @Test("queries DoH for CNAME-chain hosts to widen edge IP coverage")
@@ -141,9 +141,33 @@ struct DigDomainResolverTests {
 
         let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
 
-        #expect(resolved.ipv4 == Set(["95.100.135.209", "95.100.135.233"]))
+        #expect(Set(["95.100.135.209", "95.100.135.233"]).isSubset(of: resolved.ipv4))
         #expect(doHQueries.contains { $0.0 == "www.zalando-lounge.pl" && $0.1 == "A" })
         #expect(doHQueries.contains { $0.0 == "e10048238.a.akamaiedge.net" && $0.1 == "A" })
+    }
+
+    @Test("derives /24 CIDR entries for high-churn ipv4 pools")
+    func derivesCIDRForHighChurnIPv4Pools() {
+        let resolver = DigDomainResolver(
+            digAttemptsPerRecord: 1,
+            systemResolve: { _ in ResolvedIPSet(ipv4: [], ipv6: []) },
+            digCommand: { domain, recordType in
+                guard recordType == "A", domain == "www.zalando-lounge.pl" else {
+                    return []
+                }
+                return [
+                    "2.17.147.131",
+                    "2.17.147.152",
+                    "2.17.147.176",
+                    "2.17.147.202",
+                    "18.185.173.97"
+                ]
+            }
+        )
+
+        let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
+        #expect(resolved.ipv4CIDRs.contains("2.17.147.0/24"))
+        #expect(!resolved.ipv4CIDRs.contains("18.185.173.0/24"))
     }
 }
 

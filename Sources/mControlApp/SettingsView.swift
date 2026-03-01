@@ -7,8 +7,44 @@ struct SettingsView: View {
 
     @State private var launchAtLoginEnabled: Bool = LaunchAtLoginManager.isEnabled()
     @State private var launchAtLoginErrorMessage: String?
-    @State private var daemonInstalled: Bool = PFRefreshDaemonManager.isInstalled()
+    @State private var daemonInstallationState: PFRefreshDaemonManager.InstallationState =
+        PFRefreshDaemonManager.installationState()
     @State private var daemonStatusMessage: String?
+
+    private var daemonInstalled: Bool {
+        daemonInstallationState.isInstalled
+    }
+
+    private var daemonStatusLabel: String {
+        switch daemonInstallationState {
+        case .notInstalled:
+            return "Not installed"
+        case .installedOutdated:
+            return "Needs update"
+        case .installedCurrent:
+            return "Installed"
+        }
+    }
+
+    private var daemonStatusColor: Color {
+        switch daemonInstallationState {
+        case .installedCurrent:
+            return Color(red: 0.18, green: 0.72, blue: 0.44)
+        case .installedOutdated:
+            return Color(red: 0.85, green: 0.56, blue: 0.18)
+        case .notInstalled:
+            return Color.secondary
+        }
+    }
+
+    private var daemonActionLabel: String {
+        switch daemonInstallationState {
+        case .notInstalled:
+            return "Install Daemon"
+        case .installedOutdated, .installedCurrent:
+            return "Update Daemon"
+        }
+    }
 
     private var clampedCustomDuration: Int {
         min(max(defaultCustomDurationMinutes, 1), 10_080)
@@ -44,17 +80,13 @@ struct SettingsView: View {
             GroupBox("Background PF Refresh") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text(daemonInstalled ? "Installed" : "Not installed")
+                        Text(daemonStatusLabel)
                             .font(.custom("Avenir Next Medium", size: 14))
-                            .foregroundStyle(
-                                daemonInstalled
-                                    ? Color(red: 0.18, green: 0.72, blue: 0.44)
-                                    : Color.secondary
-                            )
+                            .foregroundStyle(daemonStatusColor)
 
                         Spacer()
 
-                        Button(daemonInstalled ? "Update Daemon" : "Install Daemon") {
+                        Button(daemonActionLabel) {
                             installOrUpdatePFDaemon()
                         }
                         .buttonStyle(.borderedProminent)
@@ -68,11 +100,7 @@ struct SettingsView: View {
                     if let daemonStatusMessage {
                         Text(daemonStatusMessage)
                             .font(.custom("Avenir Next Medium", size: 12))
-                            .foregroundStyle(
-                                daemonInstalled
-                                    ? Color(red: 0.18, green: 0.72, blue: 0.44)
-                                    : Color(red: 0.74, green: 0.26, blue: 0.23)
-                            )
+                            .foregroundStyle(daemonStatusColor)
                     }
                 }
                 .padding(.top, 4)
@@ -121,7 +149,7 @@ struct SettingsView: View {
         .padding(24)
         .onAppear {
             launchAtLoginEnabled = LaunchAtLoginManager.isEnabled()
-            daemonInstalled = PFRefreshDaemonManager.isInstalled()
+            daemonInstallationState = PFRefreshDaemonManager.installationState()
         }
     }
 
@@ -156,12 +184,17 @@ struct SettingsView: View {
     private func installOrUpdatePFDaemon() {
         do {
             try PFRefreshDaemonManager.installOrUpdate()
-            daemonInstalled = PFRefreshDaemonManager.isInstalled()
-            daemonStatusMessage = daemonInstalled
-                ? "PF daemon installed. PF refresh now runs every 1 minute in background."
-                : "Daemon install command completed, but files were not detected."
+            daemonInstallationState = PFRefreshDaemonManager.installationState()
+            switch daemonInstallationState {
+            case .installedCurrent:
+                daemonStatusMessage = "PF daemon installed and up to date. PF refresh runs every 1 minute."
+            case .installedOutdated:
+                daemonStatusMessage = "Daemon files exist but version/config mismatch remains. Re-run update."
+            case .notInstalled:
+                daemonStatusMessage = "Daemon install command completed, but files were not detected."
+            }
         } catch {
-            daemonInstalled = PFRefreshDaemonManager.isInstalled()
+            daemonInstallationState = PFRefreshDaemonManager.installationState()
             daemonStatusMessage = error.localizedDescription
         }
     }

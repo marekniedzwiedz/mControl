@@ -84,6 +84,9 @@ mControl still manages a marker-based section inside `/etc/hosts`:
 
 When active domains change, the app rewrites only that managed hosts section and also refreshes the PF anchor.
 PF IP resolution samples multiple DNS answers per domain, queries public DoH resolvers, and follows CNAME chain targets to catch rotating CDN edge IPs more reliably.
+For Akamai-style CNAME chains, mControl performs aggressive DoH ECS sampling to widen captured edge IP pools.
+For fast-rotating CDN hosts, mControl also increases repeated `dig`/DoH sampling and keeps a larger, week-long rolling PF IP union to reduce unblock gaps.
+When many active IPs fall into the same `/24`, mControl also adds that `/24` CIDR to PF to cover rapid same-subnet edge rotation.
 If DNS resolution temporarily returns no routable IPs, mControl reuses the last PF anchor IP set instead of weakening an active block.
 For the same active domain set, PF IPs are merged with previously seen entries to reduce CDN edge churn gaps between refreshes.
 After PF reload, mControl also kills existing PF states for blocked destination IPs so already-open browser connections do not bypass a newly started block.
@@ -93,6 +96,7 @@ If admin authorization is canceled, mControl rolls back the attempted UI/state c
 On app launch, if any session is active, mControl forces one startup sync to re-assert both hosts and PF rules.
 When the background PF daemon is not installed, the app also forces a periodic background re-sync every 1 hour (which may prompt for admin password again).
 When the daemon is installed from Settings, PF refresh is handled by root `launchd` (`com.mcontrol.pfrefresh`) every 1 minute without repeated prompts.
+If daemon files are present but outdated/misconfigured versus the bundled version, mControl marks that install as stale, attempts one-shot repair at launch, and does not trust it for sync decisions until updated.
 If no session is active but a stale mControl PF anchor is detected, launch also triggers a cleanup sync.
 
 ### Background PF daemon
@@ -110,6 +114,7 @@ Why it exists:
 - Hosts file rules can be bypassed by modern browser DNS behavior.
 - PF needs periodic IP refresh for active domains.
 - Daemon runs PF refresh every 1 minute as root (`launchd`) so app does not need repeated prompts.
+- mControl validates daemon binary/plist drift and surfaces `Needs update` in Settings when stale.
 
 Verification:
 
