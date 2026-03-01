@@ -25,6 +25,11 @@ struct ResolvedIPSet {
     }
 }
 
+private struct PFAnchorSnapshot {
+    var resolvedIPs: ResolvedIPSet
+    var domainSignature: String?
+}
+
 enum HostsUpdaterError: Error, LocalizedError {
     case cannotReadHosts(String)
     case cannotCreateScript
@@ -325,7 +330,7 @@ final class DigDomainResolver: DomainIPResolving {
         while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
             let current = queue.removeFirst()
             var responses = runDig(domain: current, recordType: recordType)
-            if current == domain {
+            if recordType == "A" {
                 responses.append(contentsOf: runDoH(domain: current, recordType: recordType))
             }
 
@@ -426,6 +431,7 @@ final class ManagedHostsUpdater: HostsUpdating {
     @MainActor
     func apply(activeDomains: [String]) throws {
         let normalizedDomains = DomainSanitizer.normalizeList(activeDomains)
+        let currentDomainSignature = domainSignature(for: normalizedDomains)
 
         let originalHosts: String
         do {
@@ -444,18 +450,26 @@ final class ManagedHostsUpdater: HostsUpdating {
             ? ResolvedIPSet(ipv4: [], ipv6: [])
             : resolver.resolveIPAddresses(for: normalizedDomains)
 
+        let existingAnchorSnapshot = readExistingPFAnchorSnapshot()
         let effectiveResolvedIPs: ResolvedIPSet
         if normalizedDomains.isEmpty {
             effectiveResolvedIPs = ResolvedIPSet(ipv4: [], ipv6: [])
+        } else if !freshlyResolvedIPs.isEmpty,
+                  existingAnchorSnapshot.domainSignature == currentDomainSignature {
+            effectiveResolvedIPs = ResolvedIPSet(
+                ipv4: freshlyResolvedIPs.ipv4.union(existingAnchorSnapshot.resolvedIPs.ipv4),
+                ipv6: freshlyResolvedIPs.ipv6.union(existingAnchorSnapshot.resolvedIPs.ipv6)
+            )
         } else if !freshlyResolvedIPs.isEmpty {
             effectiveResolvedIPs = freshlyResolvedIPs
         } else {
-            effectiveResolvedIPs = readExistingPFAnchorResolvedIPs()
+            effectiveResolvedIPs = existingAnchorSnapshot.resolvedIPs
         }
 
         let pfAnchorContent = renderPFAnchor(
             ipv4: effectiveResolvedIPs.ipv4,
-            ipv6: effectiveResolvedIPs.ipv6
+            ipv6: effectiveResolvedIPs.ipv6,
+            domainSignature: normalizedDomains.isEmpty ? nil : currentDomainSignature
         )
 
         var temporaryURLs: [URL] = []
@@ -522,8 +536,11 @@ final class ManagedHostsUpdater: HostsUpdating {
         }
     }
 
-    private func renderPFAnchor(ipv4: Set<String>, ipv6: Set<String>) -> String {
+    private func renderPFAnchor(ipv4: Set<String>, ipv6: Set<String>, domainSignature: String?) -> String {
         var lines: [String] = ["# mControl generated PF rules"]
+        if let domainSignature, !domainSignature.isEmpty {
+            lines.append("# mControl domains: \(domainSignature)")
+        }
 
         let sortedIPv4 = ipv4.sorted()
         if !sortedIPv4.isEmpty {
@@ -558,13 +575,26 @@ final class ManagedHostsUpdater: HostsUpdating {
         return commands
     }
 
-    private func readExistingPFAnchorResolvedIPs() -> ResolvedIPSet {
+    private func readExistingPFAnchorSnapshot() -> PFAnchorSnapshot {
         guard let existingAnchorContent = try? String(contentsOfFile: pfAnchorPath, encoding: .utf8) else {
-            return ResolvedIPSet(ipv4: [], ipv6: [])
+            return PFAnchorSnapshot(
+                resolvedIPs: ResolvedIPSet(ipv4: [], ipv6: []),
+                domainSignature: nil
+            )
         }
 
         var ipv4 = Set<String>()
         var ipv6 = Set<String>()
+        var domainSignature: String?
+
+        for line in existingAnchorContent.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let prefix = "# mControl domains: "
+            if trimmed.hasPrefix(prefix) {
+                domainSignature = String(trimmed.dropFirst(prefix.count))
+                break
+            }
+        }
 
         let separators = CharacterSet(charactersIn: "{} ,\n\t\r")
         let tokens = existingAnchorContent
@@ -580,7 +610,10 @@ final class ManagedHostsUpdater: HostsUpdating {
             }
         }
 
-        return ResolvedIPSet(ipv4: ipv4, ipv6: ipv6)
+        return PFAnchorSnapshot(
+            resolvedIPs: ResolvedIPSet(ipv4: ipv4, ipv6: ipv6),
+            domainSignature: domainSignature
+        )
     }
 
     private func isIPv4(_ value: String) -> Bool {
@@ -595,5 +628,11 @@ final class ManagedHostsUpdater: HostsUpdating {
 
     private func shellQuote(_ text: String) -> String {
         "'\(text.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+    }
+
+    private func domainSignature(for domains: [String]) -> String {
+        DomainSanitizer.normalizeList(domains)
+            .sorted()
+            .joined(separator: ",")
     }
 }

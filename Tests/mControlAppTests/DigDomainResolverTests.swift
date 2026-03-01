@@ -114,6 +114,37 @@ struct DigDomainResolverTests {
 
         #expect(resolved.ipv4 == Set(["95.101.116.8", "95.101.116.11", "95.101.116.16"]))
     }
+
+    @Test("queries DoH for CNAME-chain hosts to widen edge IP coverage")
+    func queriesDoHForCnameHosts() {
+        var doHQueries: [(String, String)] = []
+        let resolver = DigDomainResolver(
+            digAttemptsPerRecord: 1,
+            systemResolve: { _ in ResolvedIPSet(ipv4: [], ipv6: []) },
+            digCommand: { domain, recordType in
+                guard recordType == "A" else {
+                    return []
+                }
+                if domain == "www.zalando-lounge.pl" {
+                    return ["e10048238.a.akamaiedge.net."]
+                }
+                return []
+            },
+            doHQuery: { domain, recordType in
+                doHQueries.append((domain, recordType))
+                if domain == "e10048238.a.akamaiedge.net", recordType == "A" {
+                    return ["95.100.135.209", "95.100.135.233"]
+                }
+                return []
+            }
+        )
+
+        let resolved = resolver.resolveIPAddresses(for: ["www.zalando-lounge.pl"])
+
+        #expect(resolved.ipv4 == Set(["95.100.135.209", "95.100.135.233"]))
+        #expect(doHQueries.contains { $0.0 == "www.zalando-lounge.pl" && $0.1 == "A" })
+        #expect(doHQueries.contains { $0.0 == "e10048238.a.akamaiedge.net" && $0.1 == "A" })
+    }
 }
 
 private final class RotatingARecordsDigStub {

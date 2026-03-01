@@ -11,6 +11,11 @@ private struct ResolvedIPSet {
     }
 }
 
+private struct PFAnchorSnapshot {
+    var resolvedIPs: ResolvedIPSet
+    var domainSignature: String?
+}
+
 private enum DaemonError: Error, LocalizedError {
     case cannotReadHosts(String)
     case cannotWritePFAnchor(String)
@@ -33,6 +38,12 @@ private enum Constants {
     static let pfAnchorName = "com.apple/mcontrol"
     static let pfAnchorPath = "/etc/pf.anchors/com.apple.mcontrol"
     static let digPath = "/usr/bin/dig"
+}
+
+private func domainSignature(for domains: [String]) -> String {
+    DomainSanitizer.normalizeList(domains)
+        .sorted()
+        .joined(separator: ",")
 }
 
 private final class DigDomainResolver {
@@ -256,7 +267,7 @@ private final class DigDomainResolver {
         while !queue.isEmpty, seenHosts.count <= maxDigHostExpansions {
             let current = queue.removeFirst()
             var responses = runDig(domain: current, recordType: recordType)
-            if recordType == "A", current == domain {
+            if recordType == "A" {
                 responses.append(contentsOf: runDoH(domain: current, recordType: recordType))
             }
 
@@ -365,13 +376,26 @@ private func loadManagedDomainsFromHosts() throws -> [String] {
     return DomainSanitizer.normalizeList(domains)
 }
 
-private func readExistingPFAnchorResolvedIPs() -> ResolvedIPSet {
+private func readExistingPFAnchorSnapshot() -> PFAnchorSnapshot {
     guard let existingAnchorContent = try? String(contentsOfFile: Constants.pfAnchorPath, encoding: .utf8) else {
-        return ResolvedIPSet(ipv4: [], ipv6: [])
+        return PFAnchorSnapshot(
+            resolvedIPs: ResolvedIPSet(ipv4: [], ipv6: []),
+            domainSignature: nil
+        )
     }
 
     var ipv4 = Set<String>()
     var ipv6 = Set<String>()
+    var domainSignature: String?
+
+    for line in existingAnchorContent.split(whereSeparator: \.isNewline) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = "# mControl domains: "
+        if trimmed.hasPrefix(prefix) {
+            domainSignature = String(trimmed.dropFirst(prefix.count))
+            break
+        }
+    }
 
     let separators = CharacterSet(charactersIn: "{} ,\n\t\r")
     let tokens = existingAnchorContent
@@ -387,11 +411,17 @@ private func readExistingPFAnchorResolvedIPs() -> ResolvedIPSet {
         }
     }
 
-    return ResolvedIPSet(ipv4: ipv4, ipv6: ipv6)
+    return PFAnchorSnapshot(
+        resolvedIPs: ResolvedIPSet(ipv4: ipv4, ipv6: ipv6),
+        domainSignature: domainSignature
+    )
 }
 
-private func renderPFAnchor(ipv4: Set<String>, ipv6: Set<String>) -> String {
+private func renderPFAnchor(ipv4: Set<String>, ipv6: Set<String>, domainSignature: String?) -> String {
     var lines: [String] = ["# mControl generated PF rules"]
+    if let domainSignature, !domainSignature.isEmpty {
+        lines.append("# mControl domains: \(domainSignature)")
+    }
 
     let sortedIPv4 = ipv4.sorted()
     if !sortedIPv4.isEmpty {
@@ -483,9 +513,11 @@ private func isIPv6(_ value: String) -> Bool {
 
 private func runDaemonRefresh() throws {
     let domains = try loadManagedDomainsFromHosts()
+    let currentDomainSignature = domainSignature(for: domains)
+    let existingAnchorSnapshot = readExistingPFAnchorSnapshot()
 
     if domains.isEmpty {
-        try writeAnchorAtomically(renderPFAnchor(ipv4: [], ipv6: []))
+        try writeAnchorAtomically(renderPFAnchor(ipv4: [], ipv6: [], domainSignature: nil))
         _ = try runCommand("/sbin/pfctl", ["-a", Constants.pfAnchorName, "-F", "all"], allowFailure: true)
         print("mControlPFDaemon: no managed domains, PF anchor flushed")
         return
@@ -493,14 +525,28 @@ private func runDaemonRefresh() throws {
 
     let resolver = DigDomainResolver(digAttemptsPerRecord: 4)
     let resolved = resolver.resolveIPAddresses(for: domains)
-    let effective = resolved.isEmpty ? readExistingPFAnchorResolvedIPs() : resolved
+    let effective: ResolvedIPSet
+    if resolved.isEmpty {
+        effective = existingAnchorSnapshot.resolvedIPs
+    } else if existingAnchorSnapshot.domainSignature == currentDomainSignature {
+        effective = ResolvedIPSet(
+            ipv4: resolved.ipv4.union(existingAnchorSnapshot.resolvedIPs.ipv4),
+            ipv6: resolved.ipv6.union(existingAnchorSnapshot.resolvedIPs.ipv6)
+        )
+    } else {
+        effective = resolved
+    }
 
     guard !effective.isEmpty else {
         print("mControlPFDaemon: no resolved IPs and no existing PF fallback, keeping current PF rules")
         return
     }
 
-    let anchorContent = renderPFAnchor(ipv4: effective.ipv4, ipv6: effective.ipv6)
+    let anchorContent = renderPFAnchor(
+        ipv4: effective.ipv4,
+        ipv6: effective.ipv6,
+        domainSignature: currentDomainSignature
+    )
     try writeAnchorAtomically(anchorContent)
     _ = try runCommand("/sbin/pfctl", ["-q", "-a", Constants.pfAnchorName, "-f", Constants.pfAnchorPath])
     _ = try runCommand(
