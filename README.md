@@ -23,7 +23,7 @@ Menubar popover layout:
 - Menubar popover uses the same dark visual palette as the dashboard.
 - Menubar popover has an `All Groups` section with quick start (`1h`/`4h`/`24h`/`7d`) and custom duration for starting every group at once.
 - Group rows in menubar are start-focused (quick start + custom). Active session stopping is handled in `Active Sessions`.
-- Settings include `Launch at Login`, `Ask before Quit from menubar`, `Default custom duration`, and background PF daemon install/update.
+- Settings include `Launch at Login`, `Ask before Quit from menubar`, `Default custom duration` for both Dashboard and menubar custom-start sheets, and background PF daemon install/update.
 - Lets you define multiple block groups, each with its own domain list.
 - Supports multiple intervals per group (overlapping across groups is allowed).
 - Shows live status in the menubar popover and opens a full Dashboard window for editing/scheduling.
@@ -87,16 +87,18 @@ PF IP resolution samples multiple DNS answers per domain, queries public DoH res
 For Akamai-style CNAME chains, mControl performs aggressive DoH ECS sampling to widen captured edge IP pools.
 For fast-rotating CDN hosts, mControl also increases repeated `dig`/DoH sampling and keeps a larger, week-long rolling PF IP union to reduce unblock gaps.
 When many active IPs fall into the same `/24`, mControl also adds that `/24` CIDR to PF to cover rapid same-subnet edge rotation.
-If DNS resolution temporarily returns no routable IPs, mControl reuses the last PF anchor IP set instead of weakening an active block.
+If DNS resolution temporarily returns no routable IPs for the same active domain set, mControl reuses the last PF anchor IP set instead of weakening an active block.
+If the active domain set changes and no matching PF fallback exists yet, mControl clears stale PF rules rather than carrying unrelated IP blocks forward.
 For the same active domain set, PF IPs are merged with previously seen entries to reduce CDN edge churn gaps between refreshes.
 After PF reload, mControl also kills existing PF states for blocked destination IPs so already-open browser connections do not bypass a newly started block.
 
 Because `/etc/hosts` updates are privileged, macOS prompts for administrator approval when session state changes are applied.
 If admin authorization is canceled, mControl rolls back the attempted UI/state change so sessions are not shown as active/stopped unless system blocking actually succeeded.
 On app launch, if any session is active, mControl forces one startup sync to re-assert both hosts and PF rules.
+That startup sync is deferred until after the app finishes launching so the menubar app can appear immediately while revalidation runs in the background.
 When the background PF daemon is not installed, the app also forces a periodic background re-sync every 1 hour (which may prompt for admin password again).
 When the daemon is installed from Settings, PF refresh is handled by root `launchd` (`com.mcontrol.pfrefresh`) every 1 minute without repeated prompts.
-If daemon files are present but outdated/misconfigured versus the bundled version, mControl marks that install as stale, attempts one-shot repair at launch, and does not trust it for sync decisions until updated.
+If daemon files are present but outdated/misconfigured versus the bundled version, mControl marks that install as stale, attempts one-shot repair after launch, and does not trust it for sync decisions until updated.
 If no session is active but a stale mControl PF anchor is detected, launch also triggers a cleanup sync.
 
 ### Background PF daemon
@@ -175,5 +177,7 @@ swift build
 
 - The UI disallows early stop for strict intervals.
 - Strict intervals lock domains at session start (`lockedDomains`) so editing the group later does not change that running strict session.
+- Active strict intervals keep their original severity even if the group is later changed to `flexible`.
+- Active strict intervals cannot be replaced by starting the same group again or by deleting the group.
 
 This matches the intent of SelfControl-style commitment sessions while still allowing flexible sessions where needed.

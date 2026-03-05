@@ -30,12 +30,20 @@ public struct BlockInterval: Identifiable, Codable, Equatable, Sendable {
     public var startDate: Date
     public var endDate: Date
     public var lockedDomains: [String]?
+    public var sessionSeverity: BlockSeverity?
 
-    public init(id: UUID = UUID(), startDate: Date, endDate: Date, lockedDomains: [String]? = nil) {
+    public init(
+        id: UUID = UUID(),
+        startDate: Date,
+        endDate: Date,
+        lockedDomains: [String]? = nil,
+        sessionSeverity: BlockSeverity? = nil
+    ) {
         self.id = id
         self.startDate = startDate
         self.endDate = endDate
         self.lockedDomains = lockedDomains
+        self.sessionSeverity = sessionSeverity
     }
 
     public var isValid: Bool {
@@ -48,6 +56,18 @@ public struct BlockInterval: Identifiable, Codable, Equatable, Sendable {
 
     public func remainingTime(at date: Date) -> TimeInterval {
         max(0, endDate.timeIntervalSince(date))
+    }
+
+    public var effectiveSeverity: BlockSeverity {
+        if let sessionSeverity {
+            return sessionSeverity
+        }
+
+        if let lockedDomains, !lockedDomains.isEmpty {
+            return .strict
+        }
+
+        return .flexible
     }
 }
 

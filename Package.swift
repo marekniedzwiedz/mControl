@@ -31,6 +31,10 @@ let package = Package(
         .testTarget(
             name: "mControlAppTests",
             dependencies: ["mControlApp", "BlockingCore"]
+        ),
+        .testTarget(
+            name: "mControlPFDaemonTests",
+            dependencies: ["mControlPFDaemon", "BlockingCore"]
         )
     ]
 )

@@ -22,6 +22,8 @@ private struct QuickDurationSheetState: Identifiable {
 
 struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
+    @AppStorage("defaultCustomDurationMinutes") private var defaultCustomDurationMinutes: Int =
+        CustomDurationDefaults.fallbackMinutes
 
     @State private var groupSheet: GroupSheetState?
     @State private var scheduleSheet: ScheduleSheetState?
@@ -185,7 +187,10 @@ struct ContentView: View {
                     onStart24h: { viewModel.startQuickInterval(group: group, minutes: 1_440) },
                     onStart7d: { viewModel.startQuickInterval(group: group, minutes: 10_080) },
                     onStartCustom: {
-                        quickDurationSheet = QuickDurationSheetState(group: group, defaultMinutes: 60)
+                        quickDurationSheet = QuickDurationSheetState(
+                            group: group,
+                            defaultMinutes: Self.dashboardCustomDurationMinutes(defaultCustomDurationMinutes)
+                        )
                     },
                     onSchedule: {
                         scheduleSheet = ScheduleSheetState(
@@ -225,6 +230,10 @@ struct ContentView: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    static func dashboardCustomDurationMinutes(_ storedMinutes: Int) -> Int {
+        CustomDurationDefaults.clamped(storedMinutes)
     }
 }
 

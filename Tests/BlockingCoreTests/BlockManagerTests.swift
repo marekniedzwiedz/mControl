@@ -73,12 +73,17 @@ struct BlockManagerTests {
             id: group.id,
             name: "Strict block",
             domains: ["news.ycombinator.com"],
-            severity: .strict
+            severity: .flexible
         )
 
+        let snapshot = try #require(manager.activeSnapshots(at: now).first)
         let domains = manager.activeDomains(at: now)
         #expect(domains.contains("youtube.com"))
         #expect(!domains.contains("news.ycombinator.com"))
+        #expect(snapshot.severity == .strict)
+        #expect(throws: BlockManagerError.strictIntervalCannotStop) {
+            try manager.stopIntervalEarly(groupID: group.id, intervalID: snapshot.intervalID, at: now)
+        }
     }
 
     @Test("flexible active interval reflects edited domains immediately")
@@ -156,7 +161,7 @@ struct BlockManagerTests {
         let group = try manager.addGroup(
             name: "Focus",
             domains: ["x.com"],
-            severity: .strict
+            severity: .flexible
         )
 
         _ = try manager.scheduleInterval(
@@ -175,5 +180,57 @@ struct BlockManagerTests {
         #expect(snapshots.count == 1)
         #expect(snapshots.first?.intervalID == replacement.id)
         #expect(snapshots.first?.endsAt == now.addingTimeInterval(120 * 60))
+    }
+
+    @Test("starting now cannot replace an active strict interval")
+    func startNowCannotReplaceActiveStrictInterval() throws {
+        let store = InMemoryStateStore()
+        let manager = try BlockManager(store: store)
+        let now = Date(timeIntervalSince1970: 1_730_000_000)
+
+        let group = try manager.addGroup(
+            name: "Strict focus",
+            domains: ["x.com"],
+            severity: .strict
+        )
+
+        let original = try manager.scheduleInterval(
+            groupID: group.id,
+            startDate: now.addingTimeInterval(-300),
+            endDate: now.addingTimeInterval(3_600)
+        )
+
+        #expect(throws: BlockManagerError.activeStrictIntervalCannotBeReplaced) {
+            try manager.startNow(groupID: group.id, durationMinutes: 120, now: now)
+        }
+
+        let snapshot = try #require(manager.activeSnapshots(at: now).first)
+        #expect(snapshot.intervalID == original.id)
+        #expect(snapshot.endsAt == original.endDate)
+    }
+
+    @Test("group with active strict interval cannot be deleted")
+    func activeStrictGroupCannotBeDeleted() throws {
+        let store = InMemoryStateStore()
+        let manager = try BlockManager(store: store)
+        let now = Date(timeIntervalSince1970: 1_730_000_000)
+
+        let group = try manager.addGroup(
+            name: "Strict focus",
+            domains: ["x.com"],
+            severity: .strict
+        )
+
+        _ = try manager.scheduleInterval(
+            groupID: group.id,
+            startDate: now.addingTimeInterval(-300),
+            endDate: now.addingTimeInterval(3_600)
+        )
+
+        #expect(throws: BlockManagerError.activeStrictIntervalPreventsDeletion) {
+            try manager.deleteGroup(id: group.id, at: now)
+        }
+
+        #expect(manager.allGroups().count == 1)
     }
 }

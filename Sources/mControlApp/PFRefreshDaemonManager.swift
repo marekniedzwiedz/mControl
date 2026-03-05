@@ -91,7 +91,6 @@ enum PFRefreshDaemonManager {
         return .installedCurrent
     }
 
-    @MainActor
     static func installOrUpdate(
         privilegedRunner: PrivilegedCommandRunning = AppleScriptPrivilegedCommandRunner(),
         fileManager: FileManager = .default

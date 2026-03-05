@@ -7,18 +7,21 @@ import Testing
 struct AppViewModelSystemSyncTests {
     @MainActor
     @Test("launch applies system sync when persisted sessions are active and hosts are out of sync")
-    func launchAppliesSyncWhenHostsAreOutOfSync() throws {
+    func launchAppliesSyncWhenHostsAreOutOfSync() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
         _ = try manager.startNow(groupID: group.id, durationMinutes: 60, now: Date())
 
         let updater = RecordingHostsUpdater()
-        _ = AppViewModel(
+        let viewModel = AppViewModel(
             manager: manager,
             hostsUpdater: updater,
             hostsFileContentsProvider: { baseHostsContent() },
             pfAnchorContentsProvider: { cleanPFAnchorContent() }
         )
+
+        #expect(updater.applyCallCount == 0)
+        await viewModel.waitForPendingLaunchWorkForTests()
 
         #expect(updater.applyCallCount == 1)
         let appliedDomains = try #require(updater.appliedDomains.first)
@@ -27,7 +30,7 @@ struct AppViewModelSystemSyncTests {
 
     @MainActor
     @Test("launch forces system sync when persisted sessions are active even if hosts already match")
-    func launchForcesSyncWhenSessionsAreActiveAndHostsAlreadyMatch() throws {
+    func launchForcesSyncWhenSessionsAreActiveAndHostsAlreadyMatch() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
         _ = try manager.startNow(groupID: group.id, durationMinutes: 60, now: Date())
@@ -39,12 +42,15 @@ struct AppViewModelSystemSyncTests {
         )
 
         let updater = RecordingHostsUpdater()
-        _ = AppViewModel(
+        let viewModel = AppViewModel(
             manager: manager,
             hostsUpdater: updater,
             hostsFileContentsProvider: { syncedHosts },
             pfAnchorContentsProvider: { cleanPFAnchorContent() }
         )
+
+        #expect(updater.applyCallCount == 0)
+        await viewModel.waitForPendingLaunchWorkForTests()
 
         #expect(updater.applyCallCount == 1)
         let appliedDomains = try #require(updater.appliedDomains.first)
@@ -53,33 +59,36 @@ struct AppViewModelSystemSyncTests {
 
     @MainActor
     @Test("launch skips sync when no sessions are active and hosts are already clean")
-    func launchSkipsSyncWhenNoSessionsAndHostsClean() throws {
+    func launchSkipsSyncWhenNoSessionsAndHostsClean() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let updater = RecordingHostsUpdater()
 
-        _ = AppViewModel(
+        let viewModel = AppViewModel(
             manager: manager,
             hostsUpdater: updater,
             hostsFileContentsProvider: { baseHostsContent() },
             pfAnchorContentsProvider: { cleanPFAnchorContent() }
         )
 
+        await viewModel.waitForPendingLaunchWorkForTests()
         #expect(updater.applyCallCount == 0)
     }
 
     @MainActor
     @Test("launch flushes stale PF anchor when no sessions are active")
-    func launchFlushesStalePFAnchorWhenNoSessionsAreActive() throws {
+    func launchFlushesStalePFAnchorWhenNoSessionsAreActive() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let updater = RecordingHostsUpdater()
 
-        _ = AppViewModel(
+        let viewModel = AppViewModel(
             manager: manager,
             hostsUpdater: updater,
             hostsFileContentsProvider: { baseHostsContent() },
             pfAnchorContentsProvider: { stalePFAnchorContent() }
         )
 
+        #expect(updater.applyCallCount == 0)
+        await viewModel.waitForPendingLaunchWorkForTests()
         #expect(updater.applyCallCount == 1)
         let appliedDomains = try #require(updater.appliedDomains.first)
         #expect(appliedDomains.isEmpty)
@@ -87,7 +96,7 @@ struct AppViewModelSystemSyncTests {
 
     @MainActor
     @Test("active sessions trigger periodic system sync once interval elapses")
-    func activeSessionsTriggerPeriodicSystemSync() throws {
+    func activeSessionsTriggerPeriodicSystemSync() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
 
@@ -105,6 +114,7 @@ struct AppViewModelSystemSyncTests {
             periodicPFRefreshInterval: 3600
         )
 
+        await viewModel.waitForPendingLaunchWorkForTests()
         #expect(updater.applyCallCount == 1)
 
         currentDate = launchDate.addingTimeInterval(3599)
@@ -130,7 +140,8 @@ struct AppViewModelSystemSyncTests {
             hostsFileContentsProvider: { baseHostsContent() },
             pfAnchorContentsProvider: { cleanPFAnchorContent() },
             dateProvider: { currentDate },
-            periodicPFRefreshInterval: 3600
+            periodicPFRefreshInterval: 3600,
+            scheduleLaunchWork: false
         )
 
         #expect(updater.applyCallCount == 0)
@@ -152,7 +163,8 @@ struct AppViewModelSystemSyncTests {
             manager: manager,
             hostsUpdater: failingUpdater,
             hostsFileContentsProvider: { baseHostsContent() },
-            pfAnchorContentsProvider: { cleanPFAnchorContent() }
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            scheduleLaunchWork: false
         )
 
         viewModel.startQuickInterval(group: group, minutes: 60)
@@ -181,7 +193,8 @@ struct AppViewModelSystemSyncTests {
             manager: manager,
             hostsUpdater: failingUpdater,
             hostsFileContentsProvider: { syncedHosts },
-            pfAnchorContentsProvider: { cleanPFAnchorContent() }
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            scheduleLaunchWork: false
         )
         let activeSnapshot = try #require(viewModel.activeSnapshots.first)
 
@@ -191,6 +204,35 @@ struct AppViewModelSystemSyncTests {
         #expect(!viewModel.activeDomains.isEmpty)
         #expect(!manager.activeSnapshots(at: Date()).isEmpty)
         #expect(viewModel.errorMessage == "Admin authorization was canceled. Changes were not applied.")
+    }
+
+    @MainActor
+    @Test("start all groups rolls back local mutations when one group cannot be replaced")
+    func startAllGroupsRollsBackWhenAnyGroupFailsBeforeSystemSync() async throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let flexibleGroup = try manager.addGroup(name: "A Flexible", domains: ["a.com"], severity: .flexible)
+        let strictGroup = try manager.addGroup(name: "Z Strict", domains: ["z.com"], severity: .strict)
+        _ = try manager.startNow(groupID: strictGroup.id, durationMinutes: 180, now: launchDate)
+
+        let updater = RecordingHostsUpdater()
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: updater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { launchDate }
+        )
+
+        await viewModel.waitForPendingLaunchWorkForTests()
+        viewModel.startAllGroups(minutes: 60)
+
+        let activeNames = Set(viewModel.activeSnapshots.map(\.groupName))
+        #expect(activeNames == ["Z Strict"])
+        #expect(viewModel.errorMessage == BlockManagerError.activeStrictIntervalCannotBeReplaced.localizedDescription)
+        #expect(updater.applyCallCount == 1)
+        _ = flexibleGroup
     }
 }
 
@@ -213,25 +255,23 @@ private func stalePFAnchorContent() -> String {
     """
 }
 
-private final class FailingHostsUpdater: HostsUpdating {
+private final class FailingHostsUpdater: HostsUpdating, @unchecked Sendable {
     private let error: Error
 
     init(error: Error) {
         self.error = error
     }
 
-    @MainActor
     func apply(activeDomains: [String]) throws {
         _ = activeDomains
         throw error
     }
 }
 
-private final class RecordingHostsUpdater: HostsUpdating {
+private final class RecordingHostsUpdater: HostsUpdating, @unchecked Sendable {
     private(set) var applyCallCount: Int = 0
     private(set) var appliedDomains: [[String]] = []
 
-    @MainActor
     func apply(activeDomains: [String]) throws {
         applyCallCount += 1
         appliedDomains.append(activeDomains)

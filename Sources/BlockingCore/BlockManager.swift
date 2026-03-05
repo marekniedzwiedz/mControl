@@ -8,6 +8,8 @@ public enum BlockManagerError: Error, LocalizedError {
     case invalidDuration
     case invalidIntervalRange
     case strictIntervalCannotStop
+    case activeStrictIntervalCannotBeReplaced
+    case activeStrictIntervalPreventsDeletion
     case intervalNotActive
 
     public var errorDescription: String? {
@@ -26,6 +28,10 @@ public enum BlockManagerError: Error, LocalizedError {
             return "Interval end time must be after its start time."
         case .strictIntervalCannotStop:
             return "Strict sessions cannot be stopped early."
+        case .activeStrictIntervalCannotBeReplaced:
+            return "This group already has an active strict session that cannot be replaced."
+        case .activeStrictIntervalPreventsDeletion:
+            return "This group has an active strict session and cannot be deleted."
         case .intervalNotActive:
             return "This interval is not currently active."
         }
@@ -109,9 +115,13 @@ public final class BlockManager {
         try store.save(state)
     }
 
-    public func deleteGroup(id: UUID) throws {
+    public func deleteGroup(id: UUID, at date: Date = Date()) throws {
         guard let index = state.groups.firstIndex(where: { $0.id == id }) else {
             throw BlockManagerError.groupNotFound
+        }
+
+        if hasActiveStrictInterval(in: state.groups[index], at: date) {
+            throw BlockManagerError.activeStrictIntervalPreventsDeletion
         }
 
         state.groups.remove(at: index)
@@ -126,6 +136,10 @@ public final class BlockManager {
 
         guard let groupIndex = state.groups.firstIndex(where: { $0.id == groupID }) else {
             throw BlockManagerError.groupNotFound
+        }
+
+        if hasActiveStrictInterval(in: state.groups[groupIndex], at: now) {
+            throw BlockManagerError.activeStrictIntervalCannotBeReplaced
         }
 
         // "Start now" intentionally overrides any currently active intervals for the same group.
@@ -150,7 +164,12 @@ public final class BlockManager {
 
         let group = state.groups[groupIndex]
         let lockedDomains = group.severity == .strict ? DomainSanitizer.normalizeList(group.domains) : nil
-        let interval = BlockInterval(startDate: startDate, endDate: endDate, lockedDomains: lockedDomains)
+        let interval = BlockInterval(
+            startDate: startDate,
+            endDate: endDate,
+            lockedDomains: lockedDomains,
+            sessionSeverity: group.severity
+        )
 
         state.groups[groupIndex].intervals.append(interval)
         state.groups[groupIndex].intervals.sort { $0.startDate < $1.startDate }
@@ -174,7 +193,7 @@ public final class BlockManager {
             throw BlockManagerError.intervalNotActive
         }
 
-        if state.groups[groupIndex].severity == .strict {
+        if interval.effectiveSeverity == .strict {
             throw BlockManagerError.strictIntervalCannotStop
         }
 
@@ -213,5 +232,11 @@ public final class BlockManager {
 
     public func nextStateChangeDate(at date: Date = Date()) -> Date? {
         BlockPlanner.nextStateChangeDate(in: state, at: date)
+    }
+
+    private func hasActiveStrictInterval(in group: BlockGroup, at date: Date) -> Bool {
+        group.intervals.contains { interval in
+            interval.isActive(at: date) && interval.effectiveSeverity == .strict
+        }
     }
 }

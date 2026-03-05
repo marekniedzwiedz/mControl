@@ -20,7 +20,8 @@ struct MenuBarPopoverView: View {
     @State private var quickDurationSheet: QuickDurationSheetState?
     @State private var isQuitConfirmationVisible = false
     @AppStorage("confirmQuitEnabled") private var confirmQuitEnabled: Bool = true
-    @AppStorage("defaultCustomDurationMinutes") private var defaultCustomDurationMinutes: Int = 60
+    @AppStorage("defaultCustomDurationMinutes") private var defaultCustomDurationMinutes: Int =
+        CustomDurationDefaults.fallbackMinutes
 
     private let actionGreen = Color(red: 0.18, green: 0.64, blue: 0.44)
     private let warningRed = Color(red: 0.73, green: 0.32, blue: 0.22)
@@ -428,7 +429,7 @@ struct MenuBarPopoverView: View {
     }
 
     private var clampedCustomDurationMinutes: Int {
-        min(max(defaultCustomDurationMinutes, 1), 10_080)
+        CustomDurationDefaults.clamped(defaultCustomDurationMinutes)
     }
 
     private func footerActionButton(

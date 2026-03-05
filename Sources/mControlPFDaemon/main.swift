@@ -2,7 +2,7 @@ import BlockingCore
 import Darwin
 import Foundation
 
-private struct ResolvedIPSet {
+struct ResolvedIPSet {
     var ipv4: Set<String>
     var ipv6: Set<String>
     var ipv4CIDRs: Set<String>
@@ -25,7 +25,7 @@ private struct ResolvedIPSet {
     }
 }
 
-private struct PFAnchorSnapshot {
+struct PFAnchorSnapshot {
     var resolvedIPs: ResolvedIPSet
     var domainSignature: String?
     var updatedAtEpoch: Int?
@@ -770,37 +770,25 @@ private func runDaemonRefresh() throws {
 
     let resolver = DigDomainResolver(digAttemptsPerRecord: 4)
     let resolved = resolver.resolveIPAddresses(for: domains)
-    let canReuseExisting = existingAnchorSnapshot.domainSignature == currentDomainSignature
-        && isSnapshotFresh(existingAnchorSnapshot)
-
-    let effective: ResolvedIPSet
-    if resolved.isEmpty {
-        effective = existingAnchorSnapshot.resolvedIPs
-    } else if canReuseExisting {
-        effective = ResolvedIPSet(
-            ipv4: mergeEntries(
-                newest: resolved.ipv4,
-                previous: existingAnchorSnapshot.resolvedIPs.ipv4
-            ),
-            ipv6: mergeEntries(
-                newest: resolved.ipv6,
-                previous: existingAnchorSnapshot.resolvedIPs.ipv6
-            ),
-            ipv4CIDRs: mergeEntries(
-                newest: resolved.ipv4CIDRs,
-                previous: existingAnchorSnapshot.resolvedIPs.ipv4CIDRs
-            ),
-            ipv6CIDRs: mergeEntries(
-                newest: resolved.ipv6CIDRs,
-                previous: existingAnchorSnapshot.resolvedIPs.ipv6CIDRs
-            )
-        )
-    } else {
-        effective = resolved
-    }
+    let effective = effectiveResolvedIPsForRefresh(
+        resolved: resolved,
+        existingAnchorSnapshot: existingAnchorSnapshot,
+        currentDomainSignature: currentDomainSignature
+    )
 
     guard !effective.isEmpty else {
-        print("mControlPFDaemon: no resolved IPs and no existing PF fallback, keeping current PF rules")
+        try writeAnchorAtomically(
+            renderPFAnchor(
+                ipv4: [],
+                ipv6: [],
+                ipv4CIDRs: [],
+                ipv6CIDRs: [],
+                domainSignature: currentDomainSignature,
+                updatedAtEpoch: Int(Date().timeIntervalSince1970)
+            )
+        )
+        _ = try runCommand("/sbin/pfctl", ["-a", Constants.pfAnchorName, "-F", "all"], allowFailure: true)
+        print("mControlPFDaemon: cleared stale PF rules because no matching-domain IPs were available")
         return
     }
 
@@ -825,6 +813,44 @@ private func runDaemonRefresh() throws {
         "mControlPFDaemon: refreshed PF entries for \(domains.count) domain(s), " +
         "ipv4=\(effective.ipv4.count), ipv4CIDR=\(effective.ipv4CIDRs.count), " +
         "ipv6=\(effective.ipv6.count), ipv6CIDR=\(effective.ipv6CIDRs.count)"
+    )
+}
+
+func effectiveResolvedIPsForRefresh(
+    resolved: ResolvedIPSet,
+    existingAnchorSnapshot: PFAnchorSnapshot,
+    currentDomainSignature: String
+) -> ResolvedIPSet {
+    let canReuseExisting = existingAnchorSnapshot.domainSignature == currentDomainSignature
+        && isSnapshotFresh(existingAnchorSnapshot)
+
+    if resolved.isEmpty {
+        return canReuseExisting
+            ? existingAnchorSnapshot.resolvedIPs
+            : ResolvedIPSet(ipv4: [], ipv6: [], ipv4CIDRs: [], ipv6CIDRs: [])
+    }
+
+    guard canReuseExisting else {
+        return resolved
+    }
+
+    return ResolvedIPSet(
+        ipv4: mergeEntries(
+            newest: resolved.ipv4,
+            previous: existingAnchorSnapshot.resolvedIPs.ipv4
+        ),
+        ipv6: mergeEntries(
+            newest: resolved.ipv6,
+            previous: existingAnchorSnapshot.resolvedIPs.ipv6
+        ),
+        ipv4CIDRs: mergeEntries(
+            newest: resolved.ipv4CIDRs,
+            previous: existingAnchorSnapshot.resolvedIPs.ipv4CIDRs
+        ),
+        ipv6CIDRs: mergeEntries(
+            newest: resolved.ipv6CIDRs,
+            previous: existingAnchorSnapshot.resolvedIPs.ipv6CIDRs
+        )
     )
 }
 

@@ -14,6 +14,8 @@ struct DomainSanitizerTests {
         #expect(DomainSanitizer.normalized("not_a_domain") == nil)
         #expect(DomainSanitizer.normalized("") == nil)
         #expect(DomainSanitizer.normalized("--bad.com") == nil)
+        #expect(DomainSanitizer.normalized("foo-.com") == nil)
+        #expect(DomainSanitizer.normalized("foo.-bar.com") == nil)
     }
 
     @Test("normalizes list and removes duplicates")

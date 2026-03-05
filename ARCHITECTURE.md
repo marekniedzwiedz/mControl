@@ -16,12 +16,14 @@ This separation keeps blocking logic deterministic and testable while isolating 
 
 - `Models.swift`
   - Domain entities: `BlockGroup`, `BlockInterval`, `BlockSeverity`, `AppState`, `ActiveGroupSnapshot`.
+  - `BlockInterval` persists session-owned severity so active strict sessions stay strict even if the group is edited later.
 - `DomainSanitizer.swift`
   - Normalizes and validates user domain input.
 - `BlockPlanner.swift`
   - Pure computations for active sessions, effective domains, and next schedule change.
 - `BlockManager.swift`
   - Stateful API for CRUD on groups, interval scheduling, early-stop rules, and persistence updates.
+  - Prevents replacing or deleting active strict sessions from normal app flows.
 - `HostsSectionRenderer.swift`
   - Pure text transformation of hosts content using begin/end markers.
 - `StateStore.swift`
@@ -37,13 +39,14 @@ This separation keeps blocking logic deterministic and testable while isolating 
 
 - `AppViewModel.swift`
   - Coordinates user actions, periodic refresh, and host synchronization.
+  - Defers startup sync/daemon repair until after launch so the menubar app appears immediately.
 - `HostsUpdater.swift`
   - Applies rendered hosts content with admin privileges via AppleScript.
   - Resolves blocked domains to IP addresses (system DNS + `dig` + DoH) and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
   - Uses aggressive DoH ECS sampling for Akamai-style CNAME chain hosts to increase edge IP coverage.
   - For fast-rotating CDN hosts, increases repeated resolver sampling and retains larger rolling PF unions for longer windows to reduce edge-IP miss gaps.
   - Derives `/24` CIDR entries for high-churn IPv4 pools and writes them to PF to catch rapid same-subnet edge swaps.
-  - Keeps a rolling PF IP union for unchanged active domain sets, reducing unblock windows caused by CDN edge rotation.
+  - Keeps a rolling PF IP union only for unchanged active domain sets, reducing unblock windows caused by CDN edge rotation without leaking stale blocks into different domain sets.
   - Kills existing PF states for blocked destination IPs so active browser connections cannot survive newly-started blocks.
 - `PFRefreshDaemonManager.swift`
   - Installs/updates a root LaunchDaemon (`com.mcontrol.pfrefresh`) that runs PF refresh every 1 minute without repeated prompts.
@@ -60,6 +63,7 @@ This separation keeps blocking logic deterministic and testable while isolating 
 - UI stays responsive because heavy logic is already pre-shaped by core APIs.
 - Privileged operations are localized to one file (`HostsUpdater.swift`).
 - The view model computes a minimal delta (`activeDomains` changed) before writing hosts.
+- Launch avoids blocking the initial app bootstrap on startup PF/hosts revalidation.
 
 ## Tradeoffs and current limitations
 
@@ -67,7 +71,7 @@ This separation keeps blocking logic deterministic and testable while isolating 
 - Session start/stop still requires privilege to update `/etc/hosts`.
 - Optional root PF daemon removes repeated prompts for PF refresh by running under `launchd`.
 - PF rules depend on DNS resolution at apply time and may not cover all CDN edge/IP churn instantly.
-- Strict mode is app-enforced commitment; users with root access can still manually alter system files.
+- Strict mode is app-enforced commitment persisted per scheduled interval; users with root access can still manually alter system files.
 
 ## Validation status
 
@@ -75,4 +79,9 @@ This separation keeps blocking logic deterministic and testable while isolating 
   - `Tests/BlockingCoreTests/BlockManagerTests.swift`
   - `Tests/BlockingCoreTests/DomainSanitizerTests.swift`
   - `Tests/BlockingCoreTests/HostsSectionRendererTests.swift`
+- App/daemon regressions are covered by unit tests in:
+  - `Tests/mControlAppTests/AppViewModelSystemSyncTests.swift`
+  - `Tests/mControlAppTests/ManagedHostsUpdaterTests.swift`
+  - `Tests/mControlAppTests/ContentViewTests.swift`
+  - `Tests/mControlPFDaemonTests/PFRefreshSelectionTests.swift`
 - `swift test` and `swift build` pass.

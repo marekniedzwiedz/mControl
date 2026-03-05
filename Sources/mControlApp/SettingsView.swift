@@ -3,7 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var viewModel: AppViewModel
     @AppStorage("confirmQuitEnabled") private var confirmQuitEnabled: Bool = true
-    @AppStorage("defaultCustomDurationMinutes") private var defaultCustomDurationMinutes: Int = 60
+    @AppStorage("defaultCustomDurationMinutes") private var defaultCustomDurationMinutes: Int =
+        CustomDurationDefaults.fallbackMinutes
 
     @State private var launchAtLoginEnabled: Bool = LaunchAtLoginManager.isEnabled()
     @State private var launchAtLoginErrorMessage: String?
@@ -47,7 +48,7 @@ struct SettingsView: View {
     }
 
     private var clampedCustomDuration: Int {
-        min(max(defaultCustomDurationMinutes, 1), 10_080)
+        CustomDurationDefaults.clamped(defaultCustomDurationMinutes)
     }
 
     var body: some View {
@@ -55,7 +56,7 @@ struct SettingsView: View {
             Text("mControl")
                 .font(.custom("Avenir Next Bold", size: 24))
 
-            Text("This app updates /etc/hosts to block domains in active sessions.")
+            Text("This app updates both /etc/hosts and PF rules to block domains in active sessions.")
                 .font(.custom("Avenir Next Regular", size: 14))
 
             Text("When an interval starts or ends, macOS may ask for administrator approval.")

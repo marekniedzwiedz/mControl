@@ -25,6 +25,7 @@ struct ManagedHostsUpdaterTests {
 
         let existingPFAnchor = """
         # mControl generated PF rules
+        # mControl domains: x.com
         table <mcontrol_ipv4> persist { 104.244.42.1, 104.244.42.65 }
         block drop out quick inet to <mcontrol_ipv4>
         """
@@ -94,12 +95,55 @@ struct ManagedHostsUpdaterTests {
         #expect(lastCommand.contains("pfctl -k 0.0.0.0/0 -k '198.51.100.10'"))
         #expect(lastCommand.contains("pfctl -k 0.0.0.0/0 -k '198.51.100.20'"))
     }
-}
-
-private final class CapturingPrivilegedRunner: PrivilegedCommandRunning {
-    private(set) var lastCommand: String?
 
     @MainActor
+    @Test("does not reuse PF fallback IPs from a different domain set")
+    func doesNotReuseFallbackIPsFromDifferentDomainSet() throws {
+        let fileManager = FileManager.default
+        let tempRoot = fileManager.temporaryDirectory
+            .appendingPathComponent("mcontrol-updater-tests-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempRoot) }
+
+        let hostsURL = tempRoot.appendingPathComponent("hosts")
+        let pfAnchorPath = tempRoot.appendingPathComponent("pf.anchor").path
+
+        let hostsContent = HostsSectionRenderer.render(
+            originalHosts: "127.0.0.1 localhost\n",
+            activeDomains: ["y.com"]
+        )
+        try hostsContent.write(to: hostsURL, atomically: true, encoding: .utf8)
+
+        let existingPFAnchor = """
+        # mControl generated PF rules
+        # mControl domains: x.com
+        table <mcontrol_ipv4> persist { 104.244.42.1, 104.244.42.65 }
+        block drop out quick inet to <mcontrol_ipv4>
+        """
+        try existingPFAnchor.write(toFile: pfAnchorPath, atomically: true, encoding: .utf8)
+
+        let runner = CapturingPrivilegedRunner()
+        let updater = ManagedHostsUpdater(
+            fileManager: fileManager,
+            hostsURL: hostsURL,
+            privilegedRunner: runner,
+            resolver: EmptyResolver(),
+            pfAnchorName: "com.apple/test-mcontrol",
+            pfAnchorPath: pfAnchorPath
+        )
+
+        try updater.apply(activeDomains: ["y.com"])
+
+        let lastCommand = try #require(runner.lastCommand)
+        #expect(lastCommand.contains("pfctl -a 'com.apple/test-mcontrol' -F all"))
+        #expect(!lastCommand.contains("104.244.42.1"))
+        #expect(!lastCommand.contains("pfctl -q -a"))
+    }
+}
+
+private final class CapturingPrivilegedRunner: PrivilegedCommandRunning, @unchecked Sendable {
+    private(set) var lastCommand: String?
+
     func runShellCommandWithAdminPrivileges(_ command: String) throws {
         lastCommand = command
     }

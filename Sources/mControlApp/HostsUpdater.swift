@@ -2,21 +2,19 @@ import BlockingCore
 import Darwin
 import Foundation
 
-protocol HostsUpdating {
-    @MainActor
+protocol HostsUpdating: Sendable {
     func apply(activeDomains: [String]) throws
 }
 
-protocol PrivilegedCommandRunning {
-    @MainActor
+protocol PrivilegedCommandRunning: Sendable {
     func runShellCommandWithAdminPrivileges(_ command: String) throws
 }
 
-protocol DomainIPResolving {
+protocol DomainIPResolving: Sendable {
     func resolveIPAddresses(for domains: [String]) -> ResolvedIPSet
 }
 
-struct ResolvedIPSet {
+struct ResolvedIPSet: Sendable {
     var ipv4: Set<String>
     var ipv6: Set<String>
     var ipv4CIDRs: Set<String>
@@ -62,8 +60,7 @@ enum HostsUpdaterError: Error, LocalizedError {
     }
 }
 
-final class AppleScriptPrivilegedCommandRunner: PrivilegedCommandRunning {
-    @MainActor
+final class AppleScriptPrivilegedCommandRunner: PrivilegedCommandRunning, @unchecked Sendable {
     func runShellCommandWithAdminPrivileges(_ command: String) throws {
         let source = "do shell script \(appleScriptStringLiteral(command)) with administrator privileges"
 
@@ -99,7 +96,7 @@ final class AppleScriptPrivilegedCommandRunner: PrivilegedCommandRunning {
     }
 }
 
-final class DigDomainResolver: DomainIPResolving {
+final class DigDomainResolver: DomainIPResolving, @unchecked Sendable {
     typealias SystemResolveFunction = (String) -> ResolvedIPSet
     typealias DigCommandFunction = (String, String) -> [String]
     typealias DoHQueryFunction = (String, String) -> [String]
@@ -595,7 +592,7 @@ final class DigDomainResolver: DomainIPResolving {
     }
 }
 
-final class ManagedHostsUpdater: HostsUpdating {
+final class ManagedHostsUpdater: HostsUpdating, @unchecked Sendable {
     private let fileManager: FileManager
     private let hostsURL: URL
     private let privilegedRunner: PrivilegedCommandRunning
@@ -622,7 +619,6 @@ final class ManagedHostsUpdater: HostsUpdating {
         self.pfAnchorPath = pfAnchorPath
     }
 
-    @MainActor
     func apply(activeDomains: [String]) throws {
         let normalizedDomains = DomainSanitizer.normalizeList(activeDomains)
         let currentDomainSignature = domainSignature(for: normalizedDomains)
@@ -645,12 +641,13 @@ final class ManagedHostsUpdater: HostsUpdating {
             : resolver.resolveIPAddresses(for: normalizedDomains)
 
         let existingAnchorSnapshot = readExistingPFAnchorSnapshot()
+        let canReuseExistingSnapshot = existingAnchorSnapshot.domainSignature == currentDomainSignature
+            && isSnapshotFresh(existingAnchorSnapshot)
         let effectiveResolvedIPs: ResolvedIPSet
         if normalizedDomains.isEmpty {
             effectiveResolvedIPs = ResolvedIPSet(ipv4: [], ipv6: [], ipv4CIDRs: [], ipv6CIDRs: [])
         } else if !freshlyResolvedIPs.isEmpty,
-                  existingAnchorSnapshot.domainSignature == currentDomainSignature,
-                  isSnapshotFresh(existingAnchorSnapshot) {
+                  canReuseExistingSnapshot {
             effectiveResolvedIPs = ResolvedIPSet(
                 ipv4: mergeEntries(
                     newest: freshlyResolvedIPs.ipv4,
@@ -671,8 +668,10 @@ final class ManagedHostsUpdater: HostsUpdating {
             )
         } else if !freshlyResolvedIPs.isEmpty {
             effectiveResolvedIPs = freshlyResolvedIPs
-        } else {
+        } else if canReuseExistingSnapshot {
             effectiveResolvedIPs = existingAnchorSnapshot.resolvedIPs
+        } else {
+            effectiveResolvedIPs = ResolvedIPSet(ipv4: [], ipv6: [], ipv4CIDRs: [], ipv6CIDRs: [])
         }
 
         let pfAnchorContent = renderPFAnchor(
@@ -704,7 +703,7 @@ final class ManagedHostsUpdater: HostsUpdating {
             )
         }
 
-        if normalizedDomains.isEmpty {
+        if normalizedDomains.isEmpty || effectiveResolvedIPs.isEmpty {
             let tempPFURL = fileManager.temporaryDirectory
                 .appendingPathComponent("mcontrol-pf-\(UUID().uuidString).conf")
             try pfAnchorContent.write(to: tempPFURL, atomically: true, encoding: .utf8)
@@ -713,7 +712,7 @@ final class ManagedHostsUpdater: HostsUpdating {
             commandSegments.append(
                 "cp \(shellQuote(tempPFURL.path)) \(shellQuote(pfAnchorPath)) && (pfctl -a \(shellQuote(pfAnchorName)) -F all || true)"
             )
-        } else if !effectiveResolvedIPs.isEmpty {
+        } else {
             let tempPFURL = fileManager.temporaryDirectory
                 .appendingPathComponent("mcontrol-pf-\(UUID().uuidString).conf")
             try pfAnchorContent.write(to: tempPFURL, atomically: true, encoding: .utf8)

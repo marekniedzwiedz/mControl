@@ -1,4 +1,5 @@
 import BlockingCore
+import Dispatch
 import Foundation
 import SwiftUI
 
@@ -41,7 +42,9 @@ final class AppViewModel: ObservableObject {
     private let dateProvider: () -> Date
     private let periodicPFRefreshInterval: TimeInterval
     private let forcedPeriodicSyncEnabledProvider: () -> Bool
+    private let shouldRepairOutdatedDaemonAtLaunch: Bool
     private var refreshTimer: Timer?
+    private var startupTask: Task<Void, Never>?
     private var lastAppliedDomains: [String] = []
     private var lastHostsApplyFailureDate: Date?
     private var isSystemSyncInProgress: Bool = false
@@ -55,7 +58,9 @@ final class AppViewModel: ObservableObject {
         pfAnchorContentsProvider: @escaping () -> String? = AppViewModel.readSystemPFAnchorFile,
         dateProvider: @escaping () -> Date = Date.init,
         periodicPFRefreshInterval: TimeInterval = 3600,
-        forcedPeriodicSyncEnabledProvider: @escaping () -> Bool = { true }
+        forcedPeriodicSyncEnabledProvider: @escaping () -> Bool = { true },
+        shouldRepairOutdatedDaemonAtLaunch: Bool = false,
+        scheduleLaunchWork: Bool = true
     ) {
         self.manager = manager
         self.hostsUpdater = hostsUpdater
@@ -64,22 +69,20 @@ final class AppViewModel: ObservableObject {
         self.dateProvider = dateProvider
         self.periodicPFRefreshInterval = max(60, periodicPFRefreshInterval)
         self.forcedPeriodicSyncEnabledProvider = forcedPeriodicSyncEnabledProvider
+        self.shouldRepairOutdatedDaemonAtLaunch = shouldRepairOutdatedDaemonAtLaunch
 
         let launchDate = dateProvider()
         loadStateWithoutHostsWrite(currentDate: launchDate)
-        synchronizeSystemStateOnLaunchIfNeeded(referenceDate: launchDate)
         startTimer()
+        if scheduleLaunchWork {
+            scheduleDeferredLaunchWork(referenceDate: launchDate)
+        }
     }
 
     static func live() throws -> AppViewModel {
         let stateStore = JSONStateStore(fileURL: try JSONStateStore.defaultFileURL())
         let manager = try BlockManager(store: stateStore)
         let daemonStateAtLaunch = PFRefreshDaemonManager.installationState()
-
-        // If daemon files exist but are stale versus bundled resources, try one-shot repair.
-        if daemonStateAtLaunch == .installedOutdated {
-            try? PFRefreshDaemonManager.installOrUpdate()
-        }
 
         let forcedPeriodicInterval: TimeInterval =
             daemonStateAtLaunch == .installedOutdated ? 60 : 3600
@@ -90,7 +93,8 @@ final class AppViewModel: ObservableObject {
             periodicPFRefreshInterval: forcedPeriodicInterval,
             forcedPeriodicSyncEnabledProvider: {
                 !PFRefreshDaemonManager.installationState().isUpToDate
-            }
+            },
+            shouldRepairOutdatedDaemonAtLaunch: daemonStateAtLaunch == .installedOutdated
         )
     }
 
@@ -266,11 +270,17 @@ final class AppViewModel: ObservableObject {
     }
 
     private func performMutationWithSystemRollback(successMessage: String, mutation: () throws -> Void) {
+        guard !isSystemSyncInProgress else {
+            infoMessage = "System sync in progress. Try again in a moment."
+            return
+        }
+
         let previousState = manager.snapshotState()
 
         do {
             try mutation()
         } catch {
+            try? manager.restoreState(previousState)
             errorMessage = error.localizedDescription
             return
         }
@@ -312,16 +322,35 @@ final class AppViewModel: ObservableObject {
         reloadStateAndApplyHosts(forceHostWrite: false)
     }
 
-    private func synchronizeSystemStateOnLaunchIfNeeded(referenceDate: Date) {
+    private func scheduleDeferredLaunchWork(referenceDate: Date) {
+        startupTask?.cancel()
+        startupTask = Task { [weak self] in
+            await self?.runDeferredLaunchWork(referenceDate: referenceDate)
+        }
+    }
+
+    private func runDeferredLaunchWork(referenceDate: Date) async {
+        await synchronizeSystemStateOnLaunchIfNeeded(referenceDate: referenceDate)
+
+        guard shouldRepairOutdatedDaemonAtLaunch, !Task.isCancelled else {
+            return
+        }
+
+        try? await Self.runBlockingOperationInBackground {
+            try PFRefreshDaemonManager.installOrUpdate()
+        }
+    }
+
+    private func synchronizeSystemStateOnLaunchIfNeeded(referenceDate: Date) async {
         if !activeDomains.isEmpty {
             // Ensure both /etc/hosts and PF anchor rules are re-applied after restart.
             lastPeriodicRefreshAttemptDate = referenceDate
-            reloadStateAndApplyHosts(forceHostWrite: true, referenceDate: referenceDate)
+            await reloadStateAndApplyHostsInBackground(forceHostWrite: true, referenceDate: referenceDate)
             return
         }
 
         if hostsFileNeedsSync(for: activeDomains) || pfAnchorNeedsCleanupWhenIdle() {
-            reloadStateAndApplyHosts(forceHostWrite: true, referenceDate: referenceDate)
+            await reloadStateAndApplyHostsInBackground(forceHostWrite: true, referenceDate: referenceDate)
         }
     }
 
@@ -455,6 +484,49 @@ final class AppViewModel: ObservableObject {
         refreshHostsStatus(for: domains)
     }
 
+    private func reloadStateAndApplyHostsInBackground(forceHostWrite: Bool, referenceDate: Date? = nil) async {
+        let refreshDate = referenceDate ?? dateProvider()
+
+        do {
+            try manager.pruneExpiredIntervals(referenceDate: refreshDate)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        refreshPublishedState(at: refreshDate, updateLastAppliedDomains: false)
+        let domains = activeDomains
+
+        let shouldWriteHosts = forceHostWrite || domains != lastAppliedDomains
+
+        guard shouldWriteHosts else {
+            refreshHostsStatus(for: domains)
+            return
+        }
+
+        guard !isSystemSyncInProgress else {
+            refreshHostsStatus(for: domains)
+            return
+        }
+
+        isSystemSyncInProgress = true
+        defer { isSystemSyncInProgress = false }
+
+        do {
+            try await Self.runBlockingOperationInBackground { [hostsUpdater] in
+                try hostsUpdater.apply(activeDomains: domains)
+            }
+            lastAppliedDomains = domains
+            lastHostsApplyFailureDate = nil
+            lastSuccessfulSystemSyncDate = refreshDate
+            lastPeriodicRefreshAttemptDate = refreshDate
+        } catch {
+            lastHostsApplyFailureDate = refreshDate
+            errorMessage = error.localizedDescription
+        }
+
+        refreshHostsStatus(for: domains)
+    }
+
     private func parseDomainInput(_ text: String) -> [String] {
         text
             .replacingOccurrences(of: ",", with: "\n")
@@ -552,10 +624,27 @@ final class AppViewModel: ObservableObject {
     private nonisolated static func readSystemPFAnchorFile() -> String? {
         try? String(contentsOfFile: "/etc/pf.anchors/com.apple.mcontrol", encoding: .utf8)
     }
+
+    private nonisolated static func runBlockingOperationInBackground<T: Sendable>(
+        _ operation: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(returning: try operation())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func waitForPendingLaunchWorkForTests() async {
+        await startupTask?.value
+    }
 }
 
-private final class NoOpHostsUpdater: HostsUpdating {
-    @MainActor
+private final class NoOpHostsUpdater: HostsUpdating, @unchecked Sendable {
     func apply(activeDomains: [String]) throws {
         _ = activeDomains
     }

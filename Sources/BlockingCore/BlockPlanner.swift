@@ -15,7 +15,7 @@ public enum BlockPlanner {
                     ActiveGroupSnapshot(
                         groupID: group.id,
                         groupName: group.name,
-                        severity: group.severity,
+                        severity: interval.effectiveSeverity,
                         intervalID: interval.id,
                         endsAt: interval.endDate,
                         domains: domains
@@ -64,7 +64,7 @@ public enum BlockPlanner {
     }
 
     public static func effectiveDomains(for group: BlockGroup, interval: BlockInterval) -> [String] {
-        switch group.severity {
+        switch interval.effectiveSeverity {
         case .strict:
             if let locked = interval.lockedDomains, !locked.isEmpty {
                 return DomainSanitizer.normalizeList(locked)

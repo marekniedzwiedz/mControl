@@ -37,13 +37,19 @@ public enum DomainSanitizer {
             return nil
         }
 
-        if value.hasPrefix("-") || value.hasSuffix("-") {
-            return nil
-        }
-
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-.")
         let unicodeScalars = value.unicodeScalars
         guard unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+
+        let labels = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.allSatisfy({ label in
+            !label.isEmpty &&
+            !label.hasPrefix("-") &&
+            !label.hasSuffix("-") &&
+            label.count <= 63
+        }) else {
             return nil
         }
 
