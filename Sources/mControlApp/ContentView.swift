@@ -146,6 +146,20 @@ struct ContentView: View {
                             : Color(red: 0.96, green: 0.73, blue: 0.55)
                     )
                     .lineLimit(2)
+
+                Spacer()
+
+                if viewModel.canRetrySystemSync {
+                    Button {
+                        viewModel.retrySystemSync()
+                    } label: {
+                        Label("Retry Sync", systemImage: "arrow.clockwise")
+                            .font(.custom("Avenir Next Demi Bold", size: 11))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(Color(red: 0.50, green: 0.76, blue: 0.93))
+                }
             }
 
             if let infoMessage = viewModel.infoMessage {

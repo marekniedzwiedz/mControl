@@ -38,8 +38,8 @@ This separation keeps blocking logic deterministic and testable while isolating 
 ## App layer (`mControlApp`)
 
 - `AppViewModel.swift`
-  - Coordinates user actions, periodic refresh, and host synchronization.
-  - Defers startup sync/daemon repair until after launch so the menubar app appears immediately.
+  - Coordinates user actions, startup/scheduled synchronization, manual retry, and host synchronization.
+  - Defers startup sync until after launch so the menubar app appears immediately.
 - `HostsUpdater.swift`
   - Applies rendered hosts content with admin privileges via AppleScript.
   - Resolves blocked domains to IP addresses (system DNS + `dig` + DoH) and applies PF anchor rules (`com.apple/mcontrol`) for firewall-level blocking.
@@ -64,12 +64,14 @@ This separation keeps blocking logic deterministic and testable while isolating 
 - Privileged operations are localized to one file (`HostsUpdater.swift`).
 - The view model computes a minimal delta (`activeDomains` changed) before writing hosts.
 - Launch avoids blocking the initial app bootstrap on startup PF/hosts revalidation.
+- Failed automatic syncs are recorded by active domain set so the app does not repeatedly request administrator approval for the same failed background operation.
 
 ## Tradeoffs and current limitations
 
 - Blocking uses `/etc/hosts` plus PF anchor rules.
 - Session start/stop still requires privilege to update `/etc/hosts`.
 - Optional root PF daemon removes repeated prompts for PF refresh by running under `launchd`.
+- Without the daemon, the app does not run recurring privileged PF refresh prompts during active sessions; users can retry failed system syncs explicitly from the dashboard or menubar.
 - PF rules depend on DNS resolution at apply time and may not cover all CDN edge/IP churn instantly.
 - Strict mode is app-enforced commitment persisted per scheduled interval; users with root access can still manually alter system files.
 

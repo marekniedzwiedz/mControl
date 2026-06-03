@@ -98,22 +98,45 @@ struct MenuBarPopoverView: View {
 
     private var headerSection: some View {
         sectionCard {
-            HStack(alignment: .center) {
-                Label("mControl", systemImage: viewModel.menuBarSymbolName)
-                    .font(.custom("Avenir Next Demi Bold", size: 20))
-                    .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center) {
+                    Label("mControl", systemImage: viewModel.menuBarSymbolName)
+                        .font(.custom("Avenir Next Demi Bold", size: 20))
+                        .foregroundStyle(.white)
 
-                Spacer()
+                    Spacer()
 
-                Text(viewModel.activeSnapshots.isEmpty ? "Idle" : "Active")
-                    .font(.custom("Avenir Next Demi Bold", size: 11))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .foregroundStyle(.white)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(viewModel.activeSnapshots.isEmpty ? Color.gray.opacity(0.65) : actionGreen)
-                    )
+                    Text(viewModel.activeSnapshots.isEmpty ? "Idle" : "Active")
+                        .font(.custom("Avenir Next Demi Bold", size: 11))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .foregroundStyle(.white)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(viewModel.activeSnapshots.isEmpty ? Color.gray.opacity(0.65) : actionGreen)
+                        )
+                }
+
+                HStack(spacing: 8) {
+                    Text(viewModel.hostsStatusMessage)
+                        .font(.custom("Avenir Next Regular", size: 11))
+                        .foregroundStyle(secondaryText)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    if viewModel.canRetrySystemSync {
+                        Button {
+                            viewModel.retrySystemSync()
+                        } label: {
+                            Label("Retry", systemImage: "arrow.clockwise")
+                                .font(.custom("Avenir Next Demi Bold", size: 11))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(Color(red: 0.50, green: 0.76, blue: 0.93))
+                    }
+                }
             }
         }
     }

@@ -42,7 +42,7 @@ Menubar popover layout:
 5. Start a session from:
    - Dashboard group card (`1h`, `4h`, `24h`, `7d`, or `Custom`).
    - Menubar popover (`All Groups` or per-group quick buttons).
-6. Optional but recommended: in `Settings`, install `Background PF Refresh` daemon to avoid repeated password prompts for PF refresh.
+6. Optional but recommended: in `Settings`, install `Background PF Refresh` daemon to refresh PF rules every minute without app-side password prompts.
 
 ## Where To Create Groups
 
@@ -96,9 +96,9 @@ Because `/etc/hosts` updates are privileged, macOS prompts for administrator app
 If admin authorization is canceled, mControl rolls back the attempted UI/state change so sessions are not shown as active/stopped unless system blocking actually succeeded.
 On app launch, if any session is active, mControl forces one startup sync to re-assert both hosts and PF rules.
 That startup sync is deferred until after the app finishes launching so the menubar app can appear immediately while revalidation runs in the background.
-When the background PF daemon is not installed, the app also forces a periodic background re-sync every 1 hour (which may prompt for admin password again).
+If an automatic startup or scheduled sync fails, mControl does not repeatedly re-open administrator prompts for the same active domain set; use `Retry Sync` from the dashboard or menubar to try again.
 When the daemon is installed from Settings, PF refresh is handled by root `launchd` (`com.mcontrol.pfrefresh`) every 1 minute without repeated prompts.
-If daemon files are present but outdated/misconfigured versus the bundled version, mControl marks that install as stale, attempts one-shot repair after launch, and does not trust it for sync decisions until updated.
+If daemon files are present but outdated/misconfigured versus the bundled version, mControl marks that install as stale and does not trust it for sync decisions until updated from Settings.
 If no session is active but a stale mControl PF anchor is detected, launch also triggers a cleanup sync.
 
 ### Background PF daemon

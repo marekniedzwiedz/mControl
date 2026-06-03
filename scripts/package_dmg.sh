@@ -18,6 +18,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/dist}"
 DMG_PATH="$OUTPUT_DIR/$DMG_NAME.dmg"
 STAGING_DIR="$OUTPUT_DIR/.dmg-staging"
 ICON_PNG_PATH="$OUTPUT_DIR/$ICON_NAME.png"
+ICON_ICNS_PATH="$OUTPUT_DIR/$ICON_NAME.icns"
 CACHE_DIR="$ROOT_DIR/.build/cache"
 CONFIG_DIR="$ROOT_DIR/.build/config"
 SECURITY_DIR="$ROOT_DIR/.build/security"
@@ -102,6 +103,37 @@ do {
 SWIFT
 }
 
+render_icon_icns() {
+    local input_png="$1"
+    local output_icns="$2"
+    local iconset_dir
+    iconset_dir="$OUTPUT_DIR/$ICON_NAME.iconset"
+    rm -rf "$iconset_dir"
+    mkdir -p "$iconset_dir"
+
+    sips -z 16 16 "$input_png" --out "$iconset_dir/icon_16x16.png" >/dev/null
+    sips -z 32 32 "$input_png" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
+    sips -z 32 32 "$input_png" --out "$iconset_dir/icon_32x32.png" >/dev/null
+    sips -z 64 64 "$input_png" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
+    sips -z 128 128 "$input_png" --out "$iconset_dir/icon_128x128.png" >/dev/null
+    sips -z 256 256 "$input_png" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
+    sips -z 256 256 "$input_png" --out "$iconset_dir/icon_256x256.png" >/dev/null
+    sips -z 512 512 "$input_png" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
+    sips -z 512 512 "$input_png" --out "$iconset_dir/icon_512x512.png" >/dev/null
+    cp "$input_png" "$iconset_dir/icon_512x512@2x.png"
+
+    iconutil -c icns "$iconset_dir" -o "$output_icns"
+    rm -rf "$iconset_dir"
+}
+
+clean_app_bundle_metadata() {
+    local app_path="$1"
+
+    xattr -cr "$app_path" >/dev/null 2>&1 || true
+    xattr -d com.apple.FinderInfo "$app_path" >/dev/null 2>&1 || true
+    xattr -d 'com.apple.fileprovider.fpfs#P' "$app_path" >/dev/null 2>&1 || true
+}
+
 apply_custom_icon() {
     local target_path="$1"
     local icon_png_path="$2"
@@ -138,6 +170,7 @@ SWIFT
 
 echo "Generating icon assets..."
 render_icon_png "$ICON_PNG_PATH"
+render_icon_icns "$ICON_PNG_PATH" "$ICON_ICNS_PATH"
 
 echo "Building $PRODUCT_NAME and $DAEMON_PRODUCT_NAME ($CONFIGURATION)..."
 swift build \
@@ -197,6 +230,7 @@ cp "$BINARY_PATH" "$APP_BUNDLE_PATH/Contents/MacOS/$PRODUCT_NAME"
 chmod +x "$APP_BUNDLE_PATH/Contents/MacOS/$PRODUCT_NAME"
 cp "$DAEMON_BINARY_PATH" "$APP_BUNDLE_PATH/Contents/Resources/$DAEMON_PRODUCT_NAME"
 chmod +x "$APP_BUNDLE_PATH/Contents/Resources/$DAEMON_PRODUCT_NAME"
+cp "$ICON_ICNS_PATH" "$APP_BUNDLE_PATH/Contents/Resources/$ICON_NAME.icns"
 
 cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -211,6 +245,8 @@ cat > "$APP_BUNDLE_PATH/Contents/Info.plist" <<EOF
     <string>${PRODUCT_NAME}</string>
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
+    <key>CFBundleIconFile</key>
+    <string>${ICON_NAME}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -237,17 +273,16 @@ EOF
 
 if command -v codesign >/dev/null 2>&1; then
     echo "Applying ad-hoc signature..."
+    clean_app_bundle_metadata "$APP_BUNDLE_PATH"
     codesign --force --deep --sign - "$APP_BUNDLE_PATH" >/dev/null
-fi
-
-if ! apply_custom_icon "$APP_BUNDLE_PATH" "$ICON_PNG_PATH"; then
-    echo "Warning: failed to apply custom icon to app bundle."
+    clean_app_bundle_metadata "$APP_BUNDLE_PATH"
 fi
 
 echo "Preparing DMG staging folder..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
-cp -R "$APP_BUNDLE_PATH" "$STAGING_DIR/"
+ditto --noextattr "$APP_BUNDLE_PATH" "$STAGING_DIR/$APP_NAME.app"
+clean_app_bundle_metadata "$STAGING_DIR/$APP_NAME.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 
 echo "Creating DMG at $DMG_PATH..."
@@ -264,6 +299,8 @@ rm -rf "$STAGING_DIR"
 if ! apply_custom_icon "$DMG_PATH" "$ICON_PNG_PATH"; then
     echo "Warning: failed to apply custom icon to DMG file."
 fi
+
+clean_app_bundle_metadata "$APP_BUNDLE_PATH"
 
 echo "Done."
 echo "Installer DMG: $DMG_PATH"

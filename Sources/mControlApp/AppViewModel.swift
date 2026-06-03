@@ -42,11 +42,11 @@ final class AppViewModel: ObservableObject {
     private let dateProvider: () -> Date
     private let periodicPFRefreshInterval: TimeInterval
     private let forcedPeriodicSyncEnabledProvider: () -> Bool
-    private let shouldRepairOutdatedDaemonAtLaunch: Bool
     private var refreshTimer: Timer?
     private var startupTask: Task<Void, Never>?
     private var lastAppliedDomains: [String] = []
-    private var lastHostsApplyFailureDate: Date?
+    private var lastSystemSyncFailureDate: Date?
+    private var lastSystemSyncFailureDomains: [String]?
     private var isSystemSyncInProgress: Bool = false
     private var lastSuccessfulSystemSyncDate: Date?
     private var lastPeriodicRefreshAttemptDate: Date?
@@ -58,8 +58,7 @@ final class AppViewModel: ObservableObject {
         pfAnchorContentsProvider: @escaping () -> String? = AppViewModel.readSystemPFAnchorFile,
         dateProvider: @escaping () -> Date = Date.init,
         periodicPFRefreshInterval: TimeInterval = 3600,
-        forcedPeriodicSyncEnabledProvider: @escaping () -> Bool = { true },
-        shouldRepairOutdatedDaemonAtLaunch: Bool = false,
+        forcedPeriodicSyncEnabledProvider: @escaping () -> Bool = { false },
         scheduleLaunchWork: Bool = true
     ) {
         self.manager = manager
@@ -69,7 +68,6 @@ final class AppViewModel: ObservableObject {
         self.dateProvider = dateProvider
         self.periodicPFRefreshInterval = max(60, periodicPFRefreshInterval)
         self.forcedPeriodicSyncEnabledProvider = forcedPeriodicSyncEnabledProvider
-        self.shouldRepairOutdatedDaemonAtLaunch = shouldRepairOutdatedDaemonAtLaunch
 
         let launchDate = dateProvider()
         loadStateWithoutHostsWrite(currentDate: launchDate)
@@ -82,19 +80,10 @@ final class AppViewModel: ObservableObject {
     static func live() throws -> AppViewModel {
         let stateStore = JSONStateStore(fileURL: try JSONStateStore.defaultFileURL())
         let manager = try BlockManager(store: stateStore)
-        let daemonStateAtLaunch = PFRefreshDaemonManager.installationState()
-
-        let forcedPeriodicInterval: TimeInterval =
-            daemonStateAtLaunch == .installedOutdated ? 60 : 3600
 
         return AppViewModel(
             manager: manager,
-            hostsUpdater: ManagedHostsUpdater(),
-            periodicPFRefreshInterval: forcedPeriodicInterval,
-            forcedPeriodicSyncEnabledProvider: {
-                !PFRefreshDaemonManager.installationState().isUpToDate
-            },
-            shouldRepairOutdatedDaemonAtLaunch: daemonStateAtLaunch == .installedOutdated
+            hostsUpdater: ManagedHostsUpdater()
         )
     }
 
@@ -233,6 +222,21 @@ final class AppViewModel: ObservableObject {
         infoMessage = nil
     }
 
+    var canRetrySystemSync: Bool {
+        lastSystemSyncFailureDate != nil && !isSystemSyncInProgress
+    }
+
+    func retrySystemSync() {
+        guard !isSystemSyncInProgress else {
+            infoMessage = "System sync in progress. Try again in a moment."
+            return
+        }
+
+        infoMessage = nil
+        errorMessage = nil
+        reloadStateAndApplyHosts(forceHostWrite: true)
+    }
+
     func formatRemaining(until date: Date) -> String {
         let interval = max(0, date.timeIntervalSince(now))
 
@@ -296,7 +300,7 @@ final class AppViewModel: ObservableObject {
             do {
                 try hostsUpdater.apply(activeDomains: domainsAfterMutation)
                 lastAppliedDomains = domainsAfterMutation
-                lastHostsApplyFailureDate = nil
+                clearSystemSyncFailure()
                 lastSuccessfulSystemSyncDate = operationDate
                 lastPeriodicRefreshAttemptDate = operationDate
             } catch {
@@ -309,7 +313,6 @@ final class AppViewModel: ObservableObject {
                     return
                 }
 
-                lastHostsApplyFailureDate = dateProvider()
                 infoMessage = nil
                 errorMessage = syncFailureMessage(for: error)
                 refreshPublishedState(at: dateProvider(), updateLastAppliedDomains: false)
@@ -331,14 +334,6 @@ final class AppViewModel: ObservableObject {
 
     private func runDeferredLaunchWork(referenceDate: Date) async {
         await synchronizeSystemStateOnLaunchIfNeeded(referenceDate: referenceDate)
-
-        guard shouldRepairOutdatedDaemonAtLaunch, !Task.isCancelled else {
-            return
-        }
-
-        try? await Self.runBlockingOperationInBackground {
-            try PFRefreshDaemonManager.installOrUpdate()
-        }
     }
 
     private func synchronizeSystemStateOnLaunchIfNeeded(referenceDate: Date) async {
@@ -437,6 +432,7 @@ final class AppViewModel: ObservableObject {
 
         refreshPublishedState(at: refreshDate, updateLastAppliedDomains: false)
         let domains = activeDomains
+        clearStaleSystemSyncFailureIfDomainSetChanged(to: domains)
 
         let shouldWriteHosts = forceHostWrite || domains != lastAppliedDomains
 
@@ -457,7 +453,7 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        guard forceHostWrite || canRetryAutomaticHostsApply(at: refreshDate) else {
+        guard forceHostWrite || canRetryAutomaticHostsApply(for: domains) else {
             refreshHostsStatus(for: domains)
             return
         }
@@ -468,7 +464,7 @@ final class AppViewModel: ObservableObject {
         do {
             try hostsUpdater.apply(activeDomains: domains)
             lastAppliedDomains = domains
-            lastHostsApplyFailureDate = nil
+            clearSystemSyncFailure()
             lastSuccessfulSystemSyncDate = refreshDate
             if domains.isEmpty {
                 hostsStatusMessage = "System block sync OK: no active domains."
@@ -476,9 +472,9 @@ final class AppViewModel: ObservableObject {
                 hostsStatusMessage = "System block sync OK: \(domains.count) domain(s) active."
             }
         } catch {
-            lastHostsApplyFailureDate = refreshDate
-            hostsStatusMessage = "System block sync failed. Waiting for next authorization prompt."
-            errorMessage = error.localizedDescription
+            recordSystemSyncFailure(for: domains, at: refreshDate)
+            hostsStatusMessage = "System block sync failed. Use Retry Sync to try again."
+            errorMessage = syncFailureMessage(for: error)
         }
 
         refreshHostsStatus(for: domains)
@@ -495,6 +491,7 @@ final class AppViewModel: ObservableObject {
 
         refreshPublishedState(at: refreshDate, updateLastAppliedDomains: false)
         let domains = activeDomains
+        clearStaleSystemSyncFailureIfDomainSetChanged(to: domains)
 
         let shouldWriteHosts = forceHostWrite || domains != lastAppliedDomains
 
@@ -516,12 +513,12 @@ final class AppViewModel: ObservableObject {
                 try hostsUpdater.apply(activeDomains: domains)
             }
             lastAppliedDomains = domains
-            lastHostsApplyFailureDate = nil
+            clearSystemSyncFailure()
             lastSuccessfulSystemSyncDate = refreshDate
             lastPeriodicRefreshAttemptDate = refreshDate
         } catch {
-            lastHostsApplyFailureDate = refreshDate
-            errorMessage = error.localizedDescription
+            recordSystemSyncFailure(for: domains, at: refreshDate)
+            errorMessage = syncFailureMessage(for: error)
         }
 
         refreshHostsStatus(for: domains)
@@ -561,11 +558,11 @@ final class AppViewModel: ObservableObject {
         return "\(minutes)m"
     }
 
-    private func canRetryAutomaticHostsApply(at date: Date) -> Bool {
-        guard let lastHostsApplyFailureDate else {
+    private func canRetryAutomaticHostsApply(for domains: [String]) -> Bool {
+        guard let lastSystemSyncFailureDomains else {
             return true
         }
-        return date.timeIntervalSince(lastHostsApplyFailureDate) >= 30
+        return lastSystemSyncFailureDomains != domains
     }
 
     private func shouldRunPeriodicPFRefresh(at date: Date) -> Bool {
@@ -580,6 +577,10 @@ final class AppViewModel: ObservableObject {
         }
 
         guard !isSystemSyncInProgress else {
+            return false
+        }
+
+        guard canRetryAutomaticHostsApply(for: activeDomains) else {
             return false
         }
 
@@ -598,9 +599,14 @@ final class AppViewModel: ObservableObject {
         if domains.isEmpty {
             if hasManagedHostsBlock {
                 hostsStatusMessage = "No sessions active but mControl hosts block is still present."
-            } else if lastHostsApplyFailureDate == nil {
+            } else if lastSystemSyncFailureDate == nil {
                 hostsStatusMessage = "System block sync OK: no active domains."
             }
+            return
+        }
+
+        if lastSystemSyncFailureDate != nil {
+            hostsStatusMessage = "System block sync failed. Use Retry Sync to try again."
             return
         }
 
@@ -609,12 +615,27 @@ final class AppViewModel: ObservableObject {
             return
         }
 
-        if lastHostsApplyFailureDate != nil {
-            hostsStatusMessage = "Pending admin authorization to update system blocking."
+        hostsStatusMessage = "Waiting to apply system blocking."
+    }
+
+    private func recordSystemSyncFailure(for domains: [String], at date: Date) {
+        lastSystemSyncFailureDate = date
+        lastSystemSyncFailureDomains = domains
+    }
+
+    private func clearSystemSyncFailure() {
+        lastSystemSyncFailureDate = nil
+        lastSystemSyncFailureDomains = nil
+    }
+
+    private func clearStaleSystemSyncFailureIfDomainSetChanged(to domains: [String]) {
+        guard let lastSystemSyncFailureDomains,
+              lastSystemSyncFailureDomains != domains
+        else {
             return
         }
 
-        hostsStatusMessage = "Waiting to apply system blocking."
+        clearSystemSyncFailure()
     }
 
     private nonisolated static func readSystemHostsFile() -> String? {

@@ -94,7 +94,7 @@ struct SettingsView: View {
                         .font(.custom("Avenir Next Medium", size: 13))
                     }
 
-                    Text("Installs a root launchd job to refresh PF rules every 1 minute without repeated password prompts.")
+                    Text("Installs a root launchd job to refresh PF rules every 1 minute without app-side password prompts.")
                         .font(.custom("Avenir Next Regular", size: 12))
                         .foregroundStyle(.secondary)
 

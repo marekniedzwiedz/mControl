@@ -95,8 +95,8 @@ struct AppViewModelSystemSyncTests {
     }
 
     @MainActor
-    @Test("active sessions trigger periodic system sync once interval elapses")
-    func activeSessionsTriggerPeriodicSystemSync() async throws {
+    @Test("active sessions trigger periodic system sync once interval elapses when enabled")
+    func activeSessionsTriggerPeriodicSystemSyncWhenEnabled() async throws {
         let manager = try BlockManager(store: InMemoryStateStore())
         let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
 
@@ -111,7 +111,8 @@ struct AppViewModelSystemSyncTests {
             hostsFileContentsProvider: { baseHostsContent() },
             pfAnchorContentsProvider: { cleanPFAnchorContent() },
             dateProvider: { currentDate },
-            periodicPFRefreshInterval: 3600
+            periodicPFRefreshInterval: 3600,
+            forcedPeriodicSyncEnabledProvider: { true }
         )
 
         await viewModel.waitForPendingLaunchWorkForTests()
@@ -124,6 +125,34 @@ struct AppViewModelSystemSyncTests {
         currentDate = launchDate.addingTimeInterval(3600)
         viewModel.processTick()
         #expect(updater.applyCallCount == 2)
+    }
+
+    @MainActor
+    @Test("active sessions do not trigger app-side periodic sync when disabled")
+    func activeSessionsDoNotTriggerPeriodicSystemSyncWhenDisabled() throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
+
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        _ = try manager.startNow(groupID: group.id, durationMinutes: 180, now: launchDate)
+
+        var currentDate = launchDate
+        let updater = RecordingHostsUpdater()
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: updater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { currentDate },
+            periodicPFRefreshInterval: 3600,
+            forcedPeriodicSyncEnabledProvider: { false },
+            scheduleLaunchWork: false
+        )
+
+        currentDate = launchDate.addingTimeInterval(7200)
+        viewModel.processTick()
+
+        #expect(updater.applyCallCount == 0)
     }
 
     @MainActor
@@ -152,6 +181,84 @@ struct AppViewModelSystemSyncTests {
     }
 
     @MainActor
+    @Test("automatic sync failure is not retried for the same active domains")
+    func automaticSyncFailureDoesNotRetrySameActiveDomains() throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
+
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let startDate = launchDate.addingTimeInterval(60)
+        try manager.scheduleInterval(
+            groupID: group.id,
+            startDate: startDate,
+            endDate: startDate.addingTimeInterval(3600)
+        )
+
+        var currentDate = launchDate
+        let failingUpdater = FailingHostsUpdater(
+            error: HostsUpdaterError.privilegedCommandFailed("User canceled.")
+        )
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: failingUpdater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { currentDate },
+            scheduleLaunchWork: false
+        )
+
+        currentDate = startDate
+        viewModel.processTick()
+
+        #expect(failingUpdater.applyCallCount == 1)
+        #expect(viewModel.canRetrySystemSync)
+
+        currentDate = startDate.addingTimeInterval(31)
+        viewModel.processTick()
+
+        #expect(failingUpdater.applyCallCount == 1)
+        #expect(viewModel.canRetrySystemSync)
+    }
+
+    @MainActor
+    @Test("manual retry applies system sync after automatic failure")
+    func manualRetryAppliesSystemSyncAfterAutomaticFailure() throws {
+        let manager = try BlockManager(store: InMemoryStateStore())
+        let group = try manager.addGroup(name: "Focus", domains: ["x.com"], severity: .flexible)
+
+        let launchDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let startDate = launchDate.addingTimeInterval(60)
+        try manager.scheduleInterval(
+            groupID: group.id,
+            startDate: startDate,
+            endDate: startDate.addingTimeInterval(3600)
+        )
+
+        var currentDate = launchDate
+        let updater = FailsOnceHostsUpdater(
+            error: HostsUpdaterError.privilegedCommandFailed("User canceled.")
+        )
+        let viewModel = AppViewModel(
+            manager: manager,
+            hostsUpdater: updater,
+            hostsFileContentsProvider: { baseHostsContent() },
+            pfAnchorContentsProvider: { cleanPFAnchorContent() },
+            dateProvider: { currentDate },
+            scheduleLaunchWork: false
+        )
+
+        currentDate = startDate
+        viewModel.processTick()
+        #expect(updater.applyCallCount == 1)
+        #expect(viewModel.canRetrySystemSync)
+
+        viewModel.retrySystemSync()
+
+        #expect(updater.applyCallCount == 2)
+        #expect(!viewModel.canRetrySystemSync)
+    }
+
+    @MainActor
     @Test("start interval rolls back when admin authorization is canceled")
     func startIntervalRollsBackWhenAdminAuthorizationIsCanceled() throws {
         let manager = try BlockManager(store: InMemoryStateStore())
@@ -173,6 +280,7 @@ struct AppViewModelSystemSyncTests {
         #expect(viewModel.activeDomains.isEmpty)
         #expect(manager.activeSnapshots(at: Date()).isEmpty)
         #expect(viewModel.errorMessage == "Admin authorization was canceled. Changes were not applied.")
+        #expect(!viewModel.canRetrySystemSync)
     }
 
     @MainActor
@@ -204,6 +312,7 @@ struct AppViewModelSystemSyncTests {
         #expect(!viewModel.activeDomains.isEmpty)
         #expect(!manager.activeSnapshots(at: Date()).isEmpty)
         #expect(viewModel.errorMessage == "Admin authorization was canceled. Changes were not applied.")
+        #expect(!viewModel.canRetrySystemSync)
     }
 
     @MainActor
@@ -257,6 +366,7 @@ private func stalePFAnchorContent() -> String {
 
 private final class FailingHostsUpdater: HostsUpdating, @unchecked Sendable {
     private let error: Error
+    private(set) var applyCallCount: Int = 0
 
     init(error: Error) {
         self.error = error
@@ -264,7 +374,25 @@ private final class FailingHostsUpdater: HostsUpdating, @unchecked Sendable {
 
     func apply(activeDomains: [String]) throws {
         _ = activeDomains
+        applyCallCount += 1
         throw error
+    }
+}
+
+private final class FailsOnceHostsUpdater: HostsUpdating, @unchecked Sendable {
+    private let error: Error
+    private(set) var applyCallCount: Int = 0
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func apply(activeDomains: [String]) throws {
+        _ = activeDomains
+        applyCallCount += 1
+        if applyCallCount == 1 {
+            throw error
+        }
     }
 }
 
